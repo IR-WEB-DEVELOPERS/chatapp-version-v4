@@ -38,6 +38,11 @@ async function initializeApp() {
         setupPresence();
         enhancedCache.cleanup();
 
+        // ── Group Call Invite Listener ───────────────────────────
+        // Listens for Firestore invites created when a 1-1 call is
+        // upgraded. Shows incoming-call UI so the new member can join.
+        _listenGroupCallInvites();
+
         // Initialize Profile Manager
         if (window.profileManager) {
             const avatarWrap = document.getElementById('userAvatarWrap');
@@ -557,5 +562,106 @@ function openChatById(chatId, isGroup) {
 window.openChatById = openChatById;
 window.updateUI           = updateUI;
 window.logout             = logout;
+
+// ── Group Call Invite Listener ───────────────────────────────────────────────
+// When someone calls upgradeToGroupCall() they write to groupCallInvites.
+// This listener picks it up and shows a joinable incoming-call notification.
+let _gcInviteUnsub = null;
+
+function _listenGroupCallInvites() {
+    if (!window.currentUser || !window.db) return;
+    if (_gcInviteUnsub) { _gcInviteUnsub(); _gcInviteUnsub = null; }
+
+    _gcInviteUnsub = window.db.collection('groupCallInvites')
+        .where('to', '==', window.currentUser.uid)
+        .where('status', '==', 'pending')
+        .onSnapshot(snap => {
+            snap.docChanges().forEach(async change => {
+                if (change.type !== 'added') return;
+
+                const invite = change.doc.data();
+                const docRef = change.doc.ref;
+
+                // Ignore stale invites (older than 45 s)
+                const age = (Date.now() - (invite.created?.toDate?.() || new Date(invite.created)).getTime()) / 1000;
+                if (age > 45) {
+                    docRef.update({ status: 'expired' }).catch(() => {});
+                    return;
+                }
+
+                console.log('📞 Group call invite received from', invite.fromName, 'room:', invite.roomId);
+                _showGroupCallInviteUI(invite, docRef);
+            });
+        }, err => console.error('Group call invite listener error:', err));
+}
+
+function _showGroupCallInviteUI(invite, docRef) {
+    // Remove any existing invite UI first
+    document.getElementById('gcInviteModal')?.remove();
+
+    // Stop ring if already ringing from a 1-1 call
+    const ringAudio = document.getElementById('ringSound');
+    if (ringAudio) {
+        ringAudio.currentTime = 0;
+        ringAudio.play().catch(() => {});
+    }
+
+    const modal = document.createElement('div');
+    modal.id = 'gcInviteModal';
+    modal.className = 'incoming-call-overlay';   // reuse existing call overlay style
+    modal.innerHTML = `
+        <div class="incoming-call-modal">
+            <div class="caller-info">
+                <div class="caller-avatar large">
+                    ${(invite.fromName || 'U').charAt(0).toUpperCase()}
+                </div>
+                <h3>${(invite.fromName || 'Someone').replace(/</g, '&lt;')}</h3>
+                <p>Invited you to a ${invite.isVideo ? 'Video' : 'Voice'} Call</p>
+            </div>
+            <div class="incoming-call-controls">
+                <button class="call-btn accept-call" id="gcInviteAccept">
+                    ${window.Icons ? window.Icons.get('phoneAccept', 24) : '✓'}
+                </button>
+                <button class="call-btn decline-call" id="gcInviteDecline">
+                    ${window.Icons ? window.Icons.get('phoneEnd', 24) : '✕'}
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    // Auto-dismiss after 45 s
+    const autoDecline = setTimeout(() => {
+        modal.remove();
+        docRef.update({ status: 'expired' }).catch(() => {});
+        if (ringAudio) { ringAudio.pause(); ringAudio.currentTime = 0; }
+    }, 45000);
+
+    const cleanup = () => {
+        clearTimeout(autoDecline);
+        modal.remove();
+        if (ringAudio) { ringAudio.pause(); ringAudio.currentTime = 0; }
+    };
+
+    document.getElementById('gcInviteAccept').addEventListener('click', async () => {
+        cleanup();
+        await docRef.update({ status: 'accepted' });
+        // If user is in a 1-1 call, end it first
+        if (window.webRTCManager?.currentCallId) {
+            await window.webRTCManager.endCall(true);
+        }
+        // Join the group call room
+        if (window.GroupCallManager) {
+            await window.GroupCallManager.joinExistingCall(invite.roomId, invite.isVideo);
+        }
+    });
+
+    document.getElementById('gcInviteDecline').addEventListener('click', async () => {
+        cleanup();
+        await docRef.update({ status: 'declined' }).catch(() => {});
+    });
+}
+
+window._listenGroupCallInvites = _listenGroupCallInvites;
 
 console.log('app.js loaded');
