@@ -21,6 +21,9 @@ class WebRTCManager {
         this.signalingState = 'stable';
         this.pendingAnswer = null;
         this.isSettingRemoteDescription = false;
+
+        // BUG 2 FIX: Queue for tracks that arrived before DOM was ready
+        this._pendingRemoteTracks = [];
         
         // Better ICE servers configuration
         this.iceServers = {
@@ -83,6 +86,7 @@ class WebRTCManager {
             this.isVideoCall = isVideoCall;
             this.currentCallId = this.generateCallId();
             this.pendingICECandidates = [];
+            this._pendingRemoteTracks = [];
             this.signalingState = 'have-local-offer';
             
             // Get user media with better error handling
@@ -169,6 +173,7 @@ class WebRTCManager {
             this.isCaller = false;
             this.isVideoCall = isVideoCall;
             this.pendingICECandidates = [];
+            this._pendingRemoteTracks = [];
             this.signalingState = 'have-remote-offer';
 
             // Get user media
@@ -257,36 +262,42 @@ class WebRTCManager {
                 }
             };
 
-            // Track handler — handles both audio-only (voice) and video calls
+            // BUG 2 FIX: ontrack race condition — video element DOM లో లేనప్పుడు track వస్తే
+            // updateRemoteVideo() fail అవుతుంది. Solution: track ని queue చేసి,
+            // showCallInterface() DOM insert చేసిన తర్వాత flush చేయాలి.
+            // BUG 3 FIX: Mobile autoplay — audio-only calls కి dedicated <audio> element
+            // వాడాలి. Video calls లో <video> element playsinline + muted=false గా set చేయాలి.
+            // User gesture తర్వాత play() call చేయాలి (acceptCall/startCall లో gesture ఉంది).
             this.peerConnection.ontrack = (event) => {
                 console.log('🎬 Remote track received:', event.track.kind, event.streams);
 
                 if (event.streams && event.streams[0]) {
                     this.remoteStream = event.streams[0];
+                } else {
+                    // No stream attached — build one from the track directly
+                    if (!this.remoteStream) {
+                        this.remoteStream = new MediaStream();
+                    }
+                    this.remoteStream.addTrack(event.track);
                 }
 
                 if (event.track.kind === 'audio' && !this.isVideoCall) {
-                    // Voice call: pipe audio to a dedicated <audio> element
-                    let remoteAudio = document.getElementById('remoteCallAudio');
-                    if (!remoteAudio) {
-                        remoteAudio = document.createElement('audio');
-                        remoteAudio.id = 'remoteCallAudio';
-                        remoteAudio.autoplay = true;
-                        remoteAudio.style.display = 'none';
-                        document.body.appendChild(remoteAudio);
-                    }
-                    remoteAudio.srcObject = this.remoteStream || new MediaStream([event.track]);
-                    remoteAudio.play().catch(e => console.error('Remote audio play error:', e));
-                    console.log('🔊 Remote audio element connected for voice call');
+                    // ── Voice call: pipe audio to a dedicated <audio> element ──────────
+                    // BUG 3 FIX: Use <audio> not <video> for audio-only calls.
+                    // autoplay alone is blocked on mobile; call play() explicitly after
+                    // setting srcObject so the browser treats it as user-gesture-triggered.
+                    this._attachRemoteAudio(this.remoteStream || new MediaStream([event.track]));
                 } else {
-                    // Video call: use the video element
-                    this.updateRemoteVideo();
-                    setTimeout(() => {
-                        const remoteVideo = document.getElementById('remoteVideo');
-                        if (remoteVideo) {
-                            remoteVideo.play().catch(e => console.log('Remote video play error:', e));
-                        }
-                    }, 500);
+                    // ── Video call: attach to <video> element ─────────────────────────
+                    // BUG 2 FIX: Check if DOM element exists yet. If not, queue and retry
+                    // after DOM is inserted (showCallInterface calls _flushPendingTracks).
+                    const remoteVideo = document.getElementById('remoteVideo');
+                    if (remoteVideo) {
+                        this._attachRemoteVideo(remoteVideo);
+                    } else {
+                        console.log('⏳ remoteVideo DOM not ready — queuing track for later');
+                        this._pendingRemoteTracks.push({ kind: event.track.kind, stream: this.remoteStream });
+                    }
                 }
             };
 
@@ -322,6 +333,70 @@ class WebRTCManager {
             console.error('❌ Error creating peer connection:', error);
             throw error;
         }
+    }
+
+    // BUG 2 FIX: Called by showCallInterface() after DOM is fully inserted.
+    // Flushes any remote tracks that arrived before the video element existed.
+    _flushPendingTracks() {
+        if (!this._pendingRemoteTracks.length) return;
+        console.log(`🔄 Flushing ${this._pendingRemoteTracks.length} pending remote track(s)`);
+        const remoteVideo = document.getElementById('remoteVideo');
+        this._pendingRemoteTracks.forEach(({ kind }) => {
+            if (kind !== 'audio' && remoteVideo) {
+                this._attachRemoteVideo(remoteVideo);
+            }
+        });
+        this._pendingRemoteTracks = [];
+    }
+
+    // BUG 3 FIX: Centralised helper — attaches stream to <video> and calls play()
+    // with the playsInline + muted=false combination required for mobile autoplay policy.
+    _attachRemoteVideo(videoEl) {
+        if (!videoEl || !this.remoteStream) return;
+        console.log('🎥 Attaching remote stream to video element');
+        videoEl.srcObject = this.remoteStream;
+        // playsInline is already set via HTML attribute; ensure it programmatically too
+        videoEl.playsInline = true;
+        videoEl.muted = false;
+        videoEl.play().catch(e => {
+            console.warn('Remote video play() blocked, will retry on user gesture:', e);
+            // Retry once on the next user-interaction event
+            const retry = () => {
+                videoEl.play().catch(err => console.error('Remote video retry play failed:', err));
+                document.removeEventListener('touchstart', retry);
+                document.removeEventListener('click', retry);
+            };
+            document.addEventListener('touchstart', retry, { once: true });
+            document.addEventListener('click', retry, { once: true });
+        });
+    }
+
+    // BUG 3 FIX: Dedicated audio helper for voice calls.
+    // <audio> avoids the mobile autoplay restrictions that affect <video> elements
+    // when not initiated from a direct user gesture on the media element itself.
+    _attachRemoteAudio(stream) {
+        let remoteAudio = document.getElementById('remoteCallAudio');
+        if (!remoteAudio) {
+            remoteAudio = document.createElement('audio');
+            remoteAudio.id = 'remoteCallAudio';
+            remoteAudio.style.display = 'none';
+            // BUG 3 FIX: playsInline prevents iOS from opening the system audio player
+            remoteAudio.setAttribute('playsinline', '');
+            remoteAudio.autoplay = true;
+            document.body.appendChild(remoteAudio);
+        }
+        remoteAudio.srcObject = stream;
+        remoteAudio.play().catch(e => {
+            console.warn('Remote audio play() blocked, will retry on user gesture:', e);
+            const retry = () => {
+                remoteAudio.play().catch(err => console.error('Remote audio retry play failed:', err));
+                document.removeEventListener('touchstart', retry);
+                document.removeEventListener('click', retry);
+            };
+            document.addEventListener('touchstart', retry, { once: true });
+            document.addEventListener('click', retry, { once: true });
+        });
+        console.log('🔊 Remote audio element connected for voice call');
     }
 
     setupDataChannel() {
@@ -663,7 +738,7 @@ class WebRTCManager {
         }
     }
 
-    // UI Methods (same as before, but included for completeness)
+    // UI Methods
     showCallInterface(isCaller, isVideoCall) {
         this.cleanupCallUI();
         
@@ -701,8 +776,12 @@ class WebRTCManager {
         document.body.insertAdjacentHTML('beforeend', callHTML);
         this.setupCallUIEventListeners();
         this.updateLocalVideo();
+
+        // BUG 2 FIX: DOM is now ready — flush any tracks that arrived before the
+        // video element existed. Must run AFTER insertAdjacentHTML completes.
+        this._flushPendingTracks();
+
         // NOTE: Timer is NOT started here — it starts in handleCallConnected() when peer connects
-        
         console.log('✅ Call interface shown');
     }
 
@@ -821,13 +900,7 @@ class WebRTCManager {
         const voiceDisplay = document.querySelector('.voice-call-display');
         
         if (this.remoteStream && remoteVideo) {
-            console.log('🎥 Setting remote video source');
-            remoteVideo.srcObject = this.remoteStream;
-            
-            // Ensure video plays
-            remoteVideo.play().catch(e => {
-                console.error('Remote video play failed:', e);
-            });
+            this._attachRemoteVideo(remoteVideo);
             
             // Hide voice display if this is a video call
             if (voiceDisplay && this.isVideoCall) {
@@ -844,6 +917,9 @@ class WebRTCManager {
         if (localVideo && this.localStream) {
             console.log('📹 Setting local video source');
             localVideo.srcObject = this.localStream;
+            // BUG 3 FIX: local video is always muted (no echo), playsInline for mobile
+            localVideo.muted = true;
+            localVideo.playsInline = true;
             localVideo.play().catch(e => console.log('Local video play error:', e));
         }
     }
@@ -953,6 +1029,7 @@ class WebRTCManager {
         this.currentCallId = null;
         this.callTarget = null;
         this.pendingICECandidates = [];
+        this._pendingRemoteTracks = [];
         this.pendingAnswer = null;
         this.isSettingRemoteDescription = false;
         this.signalingState = 'stable';
