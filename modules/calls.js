@@ -42,32 +42,47 @@ function initializeWebRTCManagers() {
 }
 
 function addCallButtonsToChat() {
+    // Remove any previously injected call buttons
     document.querySelectorAll('.call-buttons').forEach(b => b.remove());
 
-    const activeContainer = chatWithUID
-        ? document.getElementById('individualChat')
-        : document.getElementById('groupChatContainer');
-    const chatHeader = activeContainer?.querySelector('.chat-header');
-
-    if (!chatHeader || (!chatWithUID && !groupChatID)) return;
-
-    const callButtons = document.createElement('div');
-    callButtons.className = 'call-buttons';
+    const I = window.Icons;
 
     if (chatWithUID) {
+        const actionsDiv = document.getElementById('chatHeaderActions');
+        if (!actionsDiv) return;
+
+        const callButtons = document.createElement('div');
+        callButtons.className = 'call-buttons';
         callButtons.innerHTML = `
-            <button class="chat-call-btn voice-call" title="Voice Call">📞</button>
-            <button class="chat-call-btn video-call" title="Video Call">📹</button>
+            <button class="chat-call-btn voice-call icon-btn" title="Voice Call">
+                ${I ? I.get('phone', 20) : '📞'}
+            </button>
+            <button class="chat-call-btn video-call icon-btn" title="Video Call">
+                ${I ? I.get('video', 20) : '📹'}
+            </button>
         `;
+        // Insert before the 3-dot button
+        const moreBtn = document.getElementById('chatMoreBtn');
+        actionsDiv.insertBefore(callButtons, moreBtn || null);
+
         callButtons.querySelector('.voice-call').addEventListener('click', startVoiceCall);
         callButtons.querySelector('.video-call').addEventListener('click', startVideoCall);
-    } else if (groupChatID) {
-        callButtons.innerHTML = `
-            <button class="chat-call-btn group-call" title="Group Call (Coming Soon)" disabled>👥</button>
-        `;
-    }
 
-    chatHeader.appendChild(callButtons);
+    } else if (groupChatID) {
+        // Group call button goes into the group header actions
+        const groupActions = document.querySelector('#groupChatContainer .group-header-actions');
+        if (groupActions) {
+            const existing = groupActions.querySelector('.group-call-btn');
+            if (!existing) {
+                const btn = document.createElement('button');
+                btn.className = 'group-action-btn group-call-btn';
+                btn.title     = 'Group Call (Coming Soon)';
+                btn.disabled  = true;
+                btn.innerHTML = `${I ? I.get('users', 18) : '👥'}<span class="btn-label">Call</span>`;
+                groupActions.prepend(btn);
+            }
+        }
+    }
 }
 
 async function startVoiceCall() {
