@@ -44,12 +44,8 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// ── Static files — explicit, so the catch-all never intercepts assets ──
-app.use(express.static(path.join(__dirname), {
-    // Do NOT fall through to the SPA handler for real files
-    fallthrough: false,
-    // Suppress the default 404 so we can route SPA below
-}));
+// NOTE: express.static is registered AFTER all API routes below,
+// so /firebase-config, /vapid-public-key etc. are never shadowed by disk lookups.
 
 // ── OTP store (backed by Firestore when available, in-memory fallback) ──
 // The in-memory Map is used as a write-through cache; Firestore is the
@@ -345,6 +341,9 @@ app.get('/firebase-config', (req, res) => {
     }
     res.json(cfg);
 });
+
+// ── Static files — registered after API routes so dynamic endpoints win ──
+app.use(express.static(path.join(__dirname)));
 
 // ── SPA catch-all — ONLY for navigation requests, not missing assets ──
 // This prevents /sw.js, /manifest.json, and module JS from returning chat.html.
