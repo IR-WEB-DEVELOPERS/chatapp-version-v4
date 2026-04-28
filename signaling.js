@@ -260,7 +260,13 @@ class SignalingManager {
         } else if (callData.status === 'declined') {
             this.handleCallDeclined(callId, callData);
         }
-        // FIX: callee reads callerCandidates (the caller's ICE candidates)
+        
+        // FIX: callerCandidates ని sirf peerConnection ready అయిన తర్వాత process చేయాలి.
+        // peerConnection లేకపోతే (i.e., user still seeing incoming ring) queue చేస్తాం.
+        // webRTCManager.handleICECandidate లోనే queue logic ఉంది — అది handle చేస్తుంది.
+        // కానీ important: 'pending' status లో candidates వస్తే అవి queue అవుతాయి.
+        // Accept తర్వాత processPendingICECandidates() call అవుతుంది — సరే.
+        // కానీ 'answered' update వచ్చినప్పుడు కూడా candidates refresh చేయాలి.
         if (callData.callerCandidates && callData.callerCandidates.length > 0) {
             this.handleICECandidates(callId, callData.callerCandidates);
         }
@@ -272,19 +278,26 @@ class SignalingManager {
         if (callData.status === 'answered') {
             // BUG 1 FIX: Reset processed candidates set when a new call is answered
             this._processedCandidates.clear();
-            this.handleAnswer(callId, callData);
+            // FIX: handleAnswer async — calleeCandidates ని answer set తర్వాత process చేయాలి
+            this.handleAnswer(callId, callData).then(() => {
+                if (callData.calleeCandidates && callData.calleeCandidates.length > 0) {
+                    console.log('📥 Processing', callData.calleeCandidates.length, 'calleeCandidates after answer set');
+                    this.handleICECandidates(callId, callData.calleeCandidates);
+                }
+            });
         } else if (callData.status === 'ended') {
             this.handleCallEnd(callId, callData);
         } else if (callData.status === 'declined') {
             this.handleCallDeclined(callId, callData);
-        }
-        // FIX: caller reads calleeCandidates (the callee's ICE candidates)
-        if (callData.calleeCandidates && callData.calleeCandidates.length > 0) {
-            this.handleICECandidates(callId, callData.calleeCandidates);
+        } else {
+            // Not answered yet — still process calleeCandidates if any (will be queued)
+            if (callData.calleeCandidates && callData.calleeCandidates.length > 0) {
+                this.handleICECandidates(callId, callData.calleeCandidates);
+            }
         }
     }
 
-    handleAnswer(callId, callData) {
+    async handleAnswer(callId, callData) {
         console.log('✅ Handling answer for call:', callId);
         
         if (!callData.answer) {
@@ -298,7 +311,7 @@ class SignalingManager {
         });
         
         if (window.webRTCManager) {
-            window.webRTCManager.handleAnswer(answer);
+            await window.webRTCManager.handleAnswer(answer);
         } else {
             console.error('❌ WebRTCManager not initialized');
         }
