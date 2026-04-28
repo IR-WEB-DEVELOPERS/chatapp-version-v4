@@ -416,3 +416,199 @@
     background: #38a169;
     box-shadow: 0 0 0 3px rgba(56, 161, 105, 0.4);
 }
+
+/* ============================================================
+   Add Member to 1-1 Call — Button & Friend Picker Modal
+   ============================================================ */
+
+/* Add-member button in call controls */
+.call-btn.add-member {
+    background: #4299e1;
+    color: white;
+    position: relative;
+}
+.call-btn.add-member:hover {
+    background: #3182ce;
+}
+
+/* Friend picker modal overlay */
+.add-member-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20000;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    animation: amFadeIn 0.18s ease;
+}
+@keyframes amFadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.add-member-sheet {
+    background: #1a202c;
+    border-radius: 20px 20px 0 0;
+    width: 100%;
+    max-width: 480px;
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: amSlideUp 0.22s ease;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@keyframes amSlideUp {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+}
+
+.add-member-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid #2d3748;
+    flex-shrink: 0;
+}
+.add-member-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #e2e8f0;
+}
+.add-member-close {
+    background: none;
+    border: none;
+    color: #718096;
+    font-size: 1.4rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+.add-member-close:hover { color: #e2e8f0; background: #2d3748; }
+
+.add-member-search {
+    padding: 12px 16px;
+    flex-shrink: 0;
+}
+.add-member-search input {
+    width: 100%;
+    background: #2d3748;
+    border: 1px solid #4a5568;
+    border-radius: 10px;
+    color: #e2e8f0;
+    padding: 10px 14px;
+    font-size: 0.92rem;
+    outline: none;
+    box-sizing: border-box;
+}
+.add-member-search input:focus {
+    border-color: #4299e1;
+}
+.add-member-search input::placeholder { color: #718096; }
+
+.add-member-list {
+    overflow-y: auto;
+    flex: 1;
+    padding: 8px 0;
+}
+
+.am-friend-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    cursor: pointer;
+    transition: background 0.12s;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    color: #e2e8f0;
+}
+.am-friend-item:hover {
+    background: #2d3748;
+}
+.am-friend-item:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.am-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: #4299e1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1rem;
+    color: white;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+.am-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+.am-info { flex: 1; min-width: 0; }
+.am-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.am-status {
+    font-size: 0.78rem;
+    color: #718096;
+    margin-top: 2px;
+}
+.am-invite-badge {
+    font-size: 0.75rem;
+    background: #4299e1;
+    color: white;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+.am-invited-badge {
+    font-size: 0.75rem;
+    background: #2d3748;
+    color: #718096;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.add-member-empty {
+    text-align: center;
+    color: #718096;
+    padding: 32px 16px;
+    font-size: 0.9rem;
+}
+
+/* Upgrade banner shown in call header when someone is being invited */
+.am-invite-toast {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #2d3748;
+    color: #e2e8f0;
+    font-size: 0.82rem;
+    padding: 6px 14px;
+    border-radius: 20px;
+    white-space: nowrap;
+    pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    z-index: 10;
+}
