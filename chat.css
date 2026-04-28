@@ -1160,6 +1160,8 @@ body.dark .create-group-card {
     background: var(--sidebar-bg);
     border-top: 1px solid var(--sidebar-border);
     flex-shrink: 0;
+    position: relative;
+    z-index: 10;
 }
 
 .message-input-container {
@@ -2165,11 +2167,15 @@ body {
         padding: 12px 12px 8px;
     }
 
-    /* ── Message input padding ── */
+    /* ── Message input: always visible, above keyboard ── */
     .message-input {
         padding: 10px 12px;
         /* iOS safe area bottom padding */
         padding-bottom: max(10px, env(safe-area-inset-bottom));
+        position: sticky;
+        bottom: 0;
+        z-index: 50;
+        background: var(--sidebar-bg);
     }
 
     /* ── Sidebar header compact ── */
@@ -2204,10 +2210,10 @@ body {
         display: none;
     }
 
-    /* ── Toast: full-width on mobile ── */
+    /* ── Toast: top on mobile so it doesn't cover input bar ── */
     .toast-container {
-        top: auto;
-        bottom: max(14px, env(safe-area-inset-bottom));
+        top: max(14px, env(safe-area-inset-top));
+        bottom: auto;
         right: 12px;
         left: 12px;
     }
