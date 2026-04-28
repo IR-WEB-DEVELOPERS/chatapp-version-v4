@@ -1,151 +1,144 @@
 // ============================================================
-//  EduChat Service Worker — PWA + Real Push Notifications
+//  EduChat Service Worker — PWA + Auto-Update + Push
 //
-//  Notification paths:
-//  A) Web Push 'push' event — server sends it (browser CLOSED) 
-//  B) Main app pings SW via postMessage when tab is open
+//  Strategy:
+//   • App shell (HTML/JS/CSS) → Network-first, cache fallback
+//   • Static assets (images, audio) → Cache-first
+//   • Firebase/Google APIs → Never intercept
 //
-//  NO Firestore in SW — avoids importScripts network issues
+//  Auto-update: When new SW installs, all open tabs reload
+//   automatically — no hard refresh needed.
 // ============================================================
 
-const CACHE_NAME  = 'educhat-v6';
-const OFFLINE_URL = '/index.html';
+const CACHE_VERSION = 'educhat-v7';
+const OFFLINE_URL   = '/index.html';
 
+// Files to pre-cache on install (offline fallback)
 const PRECACHE = [
     '/',
     '/index.html',
     '/chat.html',
-    '/chat.css',
-    '/login.css',
-    '/login.js',
-    '/call-styles.css',
-    '/emojiPicker.css',
-    '/emojiPicker.js',
-    '/driveFileShare.js',
-    '/memoryCache.js',
-    '/sessionCache.js',
-    '/cacheManager.js',
-    '/hybridCache.js',
     '/manifest.json',
     '/icon-192.png',
-    // ── Module scripts (chat.html's main app) ───────────────
-    '/modules/globals.js',
-    '/modules/ui.js',
-    '/modules/app.js',
-    '/modules/messaging.js',
-    '/modules/friends.js',
-    '/modules/groups.js',
-    '/modules/presence.js',
-    '/modules/calls.js',
-    // ── Other app scripts ────────────────────────────────────
-    '/pushNotifications.js',
-    '/autoBackup.js',
-    '/privateChats.js',
-    '/profile.js',
-    '/icons.js',
-    '/chatInteractions.js',
-    '/friendProfile.css',
-    '/profile.css',
-    '/signaling.js',
-    '/webrtc.js',
+    '/modules/ring.mp3',
+    '/modules/ping.mp3',
 ];
+
+// Extensions treated as app code → always network-first
+const APP_EXTENSIONS = ['.html', '.js', '.css'];
+
+function isAppFile(url) {
+    try {
+        const pathname = new URL(url).pathname;
+        return APP_EXTENSIONS.some(ext => pathname.endsWith(ext));
+    } catch { return false; }
+}
+
+function isThirdParty(url) {
+    try {
+        const hostname = new URL(url).hostname;
+        return (
+            hostname.includes('firestore.googleapis.com') ||
+            hostname.includes('firebase') ||
+            hostname.includes('googleapis.com') ||
+            hostname.includes('gstatic.com') ||
+            hostname.includes('accounts.google.com') ||
+            hostname.includes('anthropic.com')
+        );
+    } catch { return true; }
+}
 
 // ── Install ──────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
     event.waitUntil(
-        caches.open(CACHE_NAME)
+        caches.open(CACHE_VERSION)
             .then(cache => cache.addAll(PRECACHE))
-            .then(() => self.skipWaiting())
+            .then(() => self.skipWaiting())   // activate immediately
     );
 });
 
-// ── Activate ─────────────────────────────────────────────────
+// ── Activate — delete old caches, claim all tabs ─────────────
 self.addEventListener('activate', (event) => {
     event.waitUntil(
         caches.keys()
             .then(keys => Promise.all(
-                keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
+                keys.filter(k => k !== CACHE_VERSION).map(k => caches.delete(k))
             ))
             .then(() => self.clients.claim())
-            .then(() => {
-                // Notify all open tabs that a new version is active → they auto-reload
-                return self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-            })
+            .then(() => self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
             .then(clients => {
+                // Tell every open tab: new version is live → auto reload
                 clients.forEach(client => client.postMessage({ type: 'SW_UPDATED' }));
             })
     );
 });
 
-// ── Fetch (cache-first for shell) ────────────────────────────
+// ── Fetch ────────────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
-    const url = new URL(event.request.url);
-    if (
-        event.request.method !== 'GET' ||
-        url.hostname.includes('firestore.googleapis.com') ||
-        url.hostname.includes('firebase') ||
-        url.hostname.includes('googleapis.com') ||
-        url.hostname.includes('gstatic.com') ||
-        url.hostname.includes('accounts.google.com')
-    ) { return; }
+    if (event.request.method !== 'GET') return;
+    if (isThirdParty(event.request.url))  return;
 
-    event.respondWith(
-        caches.match(event.request).then(cached => {
-            if (cached) return cached;
-            return fetch(event.request)
+    if (isAppFile(event.request.url)) {
+        // ── Network-first for HTML / JS / CSS ────────────────
+        event.respondWith(
+            fetch(event.request)
                 .then(response => {
-                    if (response && response.status === 200 && response.type === 'basic') {
+                    if (response && response.status === 200) {
                         const clone = response.clone();
-                        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+                        caches.open(CACHE_VERSION)
+                            .then(cache => cache.put(event.request, clone));
                     }
                     return response;
                 })
-                .catch(() => {
-                    if (event.request.destination === 'document') return caches.match(OFFLINE_URL);
+                .catch(() => caches.match(event.request)
+                    .then(cached => cached || caches.match(OFFLINE_URL))
+                )
+        );
+    } else {
+        // ── Cache-first for images, audio, fonts ─────────────
+        event.respondWith(
+            caches.match(event.request).then(cached => {
+                if (cached) return cached;
+                return fetch(event.request).then(response => {
+                    if (response && response.status === 200 && response.type === 'basic') {
+                        const clone = response.clone();
+                        caches.open(CACHE_VERSION)
+                            .then(cache => cache.put(event.request, clone));
+                    }
+                    return response;
+                }).catch(() => {
+                    if (event.request.destination === 'document')
+                        return caches.match(OFFLINE_URL);
                 });
-        })
-    );
+            })
+        );
+    }
 });
 
 // ============================================================
-//  PATH A — Web Push event (browser fully CLOSED)
-//  Server calls Web Push API → OS wakes SW → shows notification
+//  Push Notifications (PATH A — browser closed)
 // ============================================================
 self.addEventListener('push', (event) => {
     let data = {};
-    try {
-        data = event.data ? event.data.json() : {};
-    } catch (e) {
-        data = { title: 'EduChat', body: event.data ? event.data.text() : 'New message' };
-    }
-    console.log('[SW] Push event received:', data);
+    try { data = event.data ? event.data.json() : {}; }
+    catch (e) { data = { title: 'EduChat', body: event.data ? event.data.text() : 'New message' }; }
     event.waitUntil(showPushNotification(data));
 });
 
 // ============================================================
-//  PATH B — Message from main app (tab open/minimised)
-//  pushNotifications.js posts SHOW_NOTIFICATION to SW
+//  Messages from main app (PATH B — tab open)
 // ============================================================
 self.addEventListener('message', (event) => {
     const { type } = event.data || {};
-    if (type === 'SHOW_NOTIFICATION') {
-        showPushNotification(event.data);
-    }
-    // ignore SET_USER / CLEAR_USER — no longer needed
+    if (type === 'SHOW_NOTIFICATION') showPushNotification(event.data);
 });
 
-// ============================================================
-//  Show the system notification
-// ============================================================
+// ── Show system notification ─────────────────────────────────
 async function showPushNotification({ title, body, icon, chatId, isGroup, type }) {
     const clients    = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const foreground = clients.some(c => c.visibilityState === 'visible');
     const isCall     = type === 'call_video' || type === 'call_voice';
-    // FIX: Call notifications ని app foreground లో ఉన్నా show చేయాలి — in-app ring UI ఉన్నా OS notification కూడా కావాలి
-    // Regular messages: app visible అయితే in-app toast చాలు
     if (foreground && !isCall) return;
-
-    // FIX: Call notifications కి special urgent style
 
     await self.registration.showNotification(title || 'EduChat', {
         body:     body  || '',
@@ -154,35 +147,28 @@ async function showPushNotification({ title, body, icon, chatId, isGroup, type }
         vibrate:  isCall ? [500, 200, 500, 200, 500] : [200, 100, 200],
         tag:      isCall ? 'educhat-call' : (chatId || 'educhat'),
         renotify: true,
-        requireInteraction: isCall, // FIX: call notification auto close కాదు — user dismiss చేయాలి
+        requireInteraction: isCall,
         data:     { chatId, isGroup, type },
         actions:  isCall
             ? [{ action: 'open', title: '📲 Answer' }, { action: 'close', title: '❌ Decline' }]
-            : [{ action: 'open', title: '💬 Open' }, { action: 'close', title: '✕' }]
+            : [{ action: 'open', title: '💬 Open' },   { action: 'close', title: '✕' }]
     });
 }
 
 // ── Notification clicked ─────────────────────────────────────
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
-
     const { chatId, isGroup, type } = event.notification.data || {};
     const isCall = type === 'call_video' || type === 'call_voice';
 
-    // Decline button
     if (event.action === 'close') {
         if (isCall && chatId) {
-            // FIX: SW లో Firebase access లేదు కాబట్టి app background లో open చేసి decline చేయాలి
             event.waitUntil(
                 self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
                     const existing = clients.find(c =>
-                        c.url.includes('/chat.html') || c.url.includes(self.location.origin)
-                    );
-                    if (existing) {
-                        existing.postMessage({ type: 'DECLINE_CALL', callId: chatId, callType: type });
-                    } else {
-                        self.clients.openWindow(`/chat.html?declineCall=${chatId}&callType=${type}`);
-                    }
+                        c.url.includes('/chat.html') || c.url.includes(self.location.origin));
+                    if (existing) existing.postMessage({ type: 'DECLINE_CALL', callId: chatId, callType: type });
+                    else self.clients.openWindow(`/chat.html?declineCall=${chatId}&callType=${type}`);
                 })
             );
         }
@@ -192,15 +178,11 @@ self.addEventListener('notificationclick', (event) => {
     event.waitUntil(
         self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
             const existing = clients.find(c =>
-                c.url.includes('/chat.html') || c.url.includes(self.location.origin)
-            );
+                c.url.includes('/chat.html') || c.url.includes(self.location.origin));
             if (existing) {
                 existing.focus();
-                // FIX: type కూడా pass చేయాలి — app call ring చేయాలి
                 existing.postMessage({ type: 'NOTIFICATION_CLICKED', chatId, isGroup, callType: type });
             } else {
-                // Browser closed గా ఉంది — app open చేసి, load అయిన తర్వాత call handle చేయాలి
-                // callType ని URL లో pass చేద్దాం
                 const url = isCall
                     ? `/chat.html?callType=${type}&chatId=${chatId || ''}`
                     : '/chat.html';
