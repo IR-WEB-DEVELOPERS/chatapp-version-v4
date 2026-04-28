@@ -368,40 +368,44 @@ app.get('/firebase-config', (req, res) => {
     res.json(cfg);
 });
 
-// ── Claude AI proxy — keeps ANTHROPIC_API_KEY off the browser ────────────
+// ── Groq AI proxy — keeps GROQ_API_KEY off the browser ────────────
 app.post('/api/ai-chat', async (req, res) => {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return res.status(503).json({ error: 'AI not configured' });
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: 'AI not configured. Set GROQ_API_KEY env variable.' });
 
     const { messages, system } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ error: 'messages array required' });
     }
 
+    // Groq uses OpenAI-compatible format — system goes as first message
+    const groqMessages = [
+        { role: 'system', content: system || '' },
+        ...messages
+    ];
+
     try {
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01'
+                'Authorization': `Bearer ${apiKey}`
             },
             body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
+                model: 'llama-3.1-8b-instant',
                 max_tokens: 1000,
-                system: system || '',
-                messages
+                messages: groqMessages
             })
         });
 
         if (!response.ok) {
             const err = await response.text();
-            console.error('Anthropic API error:', response.status, err);
+            console.error('Groq API error:', response.status, err);
             return res.status(response.status).json({ error: 'AI request failed' });
         }
 
         const data = await response.json();
-        const text = data.content?.find(b => b.type === 'text')?.text || '...';
+        const text = data.choices?.[0]?.message?.content || '...';
         res.json({ text });
     } catch (err) {
         console.error('AI proxy error:', err.message);
