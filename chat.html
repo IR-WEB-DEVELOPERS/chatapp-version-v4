@@ -596,19 +596,57 @@
                     .then(reg => {
                         console.log('✅ SW registered:', reg.scope);
 
-                        // Poll for SW updates every 60 seconds
-                        setInterval(() => reg.update(), 60 * 1000);
+                        // Check for updates every 30 seconds
+                        setInterval(() => reg.update(), 30 * 1000);
+
+                        // Detect new SW installing
+                        reg.addEventListener('updatefound', () => {
+                            const newWorker = reg.installing;
+                            if (!newWorker) return;
+                            newWorker.addEventListener('statechange', () => {
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    showUpdateToast();
+                                }
+                            });
+                        });
                     })
                     .catch(err => console.warn('SW failed:', err));
 
-                // New SW activated → reload to get latest version
+                // New SW activated (skipWaiting) → reload silently
+                let reloadPending = false;
                 navigator.serviceWorker.addEventListener('message', (event) => {
-                    if (event.data?.type === 'SW_UPDATED') {
-                        console.log('🔄 New version available — reloading...');
+                    if (event.data?.type === 'SW_UPDATED' && !reloadPending) {
+                        reloadPending = true;
+                        console.log('🔄 New version active — reloading...');
+                        setTimeout(() => window.location.reload(), 300);
+                    }
+                });
+
+                // Also catch controller change (new SW took over)
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    if (!reloadPending) {
+                        reloadPending = true;
                         window.location.reload();
                     }
                 });
             });
+        }
+
+        function showUpdateToast() {
+            if (document.getElementById('_swUpdateBanner')) return;
+            const style = document.createElement('style');
+            style.textContent = `@keyframes _swSpin{to{transform:rotate(360deg)}}`;
+            document.head.appendChild(style);
+            const banner = document.createElement('div');
+            banner.id = '_swUpdateBanner';
+            banner.style.cssText = `
+                position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+                background:#323232;color:#fff;padding:10px 20px;border-radius:20px;
+                font-size:.85rem;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,.3);
+                display:flex;align-items:center;gap:8px;white-space:nowrap;
+            `;
+            banner.innerHTML = `<span style="animation:_swSpin 1s linear infinite;display:inline-block">🔄</span> Updating app…`;
+            document.body.appendChild(banner);
         }
     </script>
     <!-- FIX: Call notification tap చేసి browser open అయినప్పుడు — URL params check -->\n    <script>
