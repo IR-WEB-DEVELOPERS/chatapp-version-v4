@@ -562,6 +562,12 @@ async function openChatOptionsMenu(friendUID, friendName = 'User') {
     const isPrivate = window.privateChatsManager?.isPrivate(friendUID);
     const privateText = isPrivate ? 'Remove from Private Chats' : 'Move to Private Chats';
 
+    // Check current vanish mode state for this chat
+    const chatId = generateChatId(currentUser.uid, friendUID);
+    const vanishKey = `vanishMode_${chatId}`;
+    const isVanishOn = localStorage.getItem(vanishKey) === 'true';
+    const vanishText = isVanishOn ? '👻 Vanish Mode: ON  (tap to turn off)' : '👻 Vanish Mode: OFF (tap to turn on)';
+
     const action = await new Promise((resolve) => {
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
@@ -573,6 +579,7 @@ async function openChatOptionsMenu(friendUID, friendName = 'User') {
                     <button class="modal-close" data-action="cancel">&times;</button>
                 </div>
                 <div class="modal-body chat-options-body">
+                    <button class="chat-option-btn${isVanishOn ? ' vanish-active' : ''}" data-action="vanish">${escapeHTML(vanishText)}</button>
                     <button class="chat-option-btn" data-action="private">${escapeHTML(privateText)}</button>
                     <button class="chat-option-btn danger" data-action="block">Block Contact</button>
                     <button class="chat-option-btn muted" data-action="cancel">Cancel</button>
@@ -592,6 +599,20 @@ async function openChatOptionsMenu(friendUID, friendName = 'User') {
             if (btn) close(btn.dataset.action);
         });
     });
+
+    if (action === 'vanish') {
+        const nowOn = !isVanishOn;
+        localStorage.setItem(vanishKey, nowOn ? 'true' : 'false');
+
+        if (!nowOn) {
+            // Vanish mode OFF — delete all messages sent during vanish mode
+            await deleteVanishMessages(chatId);
+        }
+
+        // Update banner in current open chat if it's the same chat
+        if (window.updateVanishBanner) window.updateVanishBanner(friendUID);
+        return;
+    }
 
     if (action === 'private') {
         if (isPrivate) {
@@ -618,6 +639,25 @@ async function openChatOptionsMenu(friendUID, friendName = 'User') {
         }
     }
 }
+
+// ── Vanish Mode — delete messages flagged with vanishMode:true ─
+async function deleteVanishMessages(chatId) {
+    if (!currentUser) return;
+    try {
+        const snap = await db.collection('messages')
+            .where('chatId', '==', chatId)
+            .where('vanishMode', '==', true)
+            .get();
+        const batch = db.batch();
+        snap.docs.forEach(doc => {
+            batch.update(doc.ref, { deletedForAll: true });
+        });
+        if (!snap.empty) await batch.commit();
+    } catch (e) {
+        console.error('Vanish delete error:', e);
+    }
+}
+window.deleteVanishMessages = deleteVanishMessages;
 
 // ── Expose ───────────────────────────────────────────────────
 window.loadFriendsList      = loadFriendsList;
