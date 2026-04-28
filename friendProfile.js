@@ -88,6 +88,9 @@ const friendProfileViewer = (() => {
                     <button class="fp-tab" data-tab="media">
                         ${I ? I.get('image', 15) : ''} Media
                     </button>
+                    <button class="fp-tab" data-tab="qr">
+                        ${I ? I.get('share', 15) : ''} QR
+                    </button>
                 </div>
 
                 <!-- Tab: About -->
@@ -138,6 +141,17 @@ const friendProfileViewer = (() => {
                         </div>
                     </div>
                 </div>
+
+                <!-- Tab: QR -->
+                <div class="fp-tab-panel fp-panel-qr" id="fpPanelQr" style="display:none;">
+                    <div class="fp-qr-wrap">
+                        <p class="fp-qr-label">Scan to add <strong>${window.escapeHTML(data.name || 'friend')}</strong></p>
+                        <div class="fp-qr-box" id="fpQrBox"></div>
+                        <button class="fp-btn fp-btn-secondary fp-qr-share-btn" id="fpQrShareBtn">
+                            ${I ? I.get('share', 15) : ''} Share QR
+                        </button>
+                    </div>
+                </div>
             </div>
         `;
 
@@ -150,6 +164,7 @@ const friendProfileViewer = (() => {
                 _overlay.querySelectorAll('.fp-tab-panel').forEach(p => p.style.display = 'none');
                 document.getElementById(`fpPanel${name.charAt(0).toUpperCase() + name.slice(1)}`).style.display = '';
                 if (name === 'media') _loadMedia(uid);
+                if (name === 'qr')    _loadQR(uid, data);
             });
         });
 
@@ -190,6 +205,17 @@ const friendProfileViewer = (() => {
         if (unblockBtn) {
             unblockBtn.onclick = () => { window.privateChatsManager?.unblockContact(uid); open(uid); };
         }
+    }
+
+    // ── Load QR ──────────────────────────────────────────────
+    async function _loadQR(uid, data) {
+        const box = document.getElementById('fpQrBox');
+        if (!box || box.dataset.loaded) return;
+        box.dataset.loaded = '1';
+        const qrText = window.QRManager?.profileQRData(uid, data.name) || uid;
+        await window.QRManager?.generateQR(box, qrText, { size: 200 });
+        const shareBtn = document.getElementById('fpQrShareBtn');
+        if (shareBtn) shareBtn.onclick = () => window.QRManager?.shareQR(box, data.name);
     }
 
     // ── Load Media ───────────────────────────────────────────
