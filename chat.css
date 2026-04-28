@@ -3667,7 +3667,7 @@ body {
 .otv-text-content {
     margin: 0;
     font-size: 17px;
-    color: var(--text-primary, #eee);
+    color: white;
     line-height: 1.6;
     word-break: break-word;
 }
