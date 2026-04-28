@@ -226,6 +226,7 @@
                         <textarea id="msg" placeholder="Type a message..." rows="1"></textarea>
                         <span id="voiceTimer" class="voice-timer" style="display:none;">00:00</span>
                         <button id="voiceBtn" class="voice-record-btn" title="Voice message" onclick="startVoiceRecording('direct')" data-icon-btn="mic"></button>
+                        <button class="schedule-btn" title="Schedule message" onclick="showScheduleModal('direct')" data-icon-btn="schedule">📅</button>
                         <button id="sendBtn" class="send-btn" data-icon-btn="send"></button>
                     </div>
                 </div>
@@ -274,6 +275,7 @@
                         <textarea id="groupMsg" placeholder="Type a message..." rows="1"></textarea>
                         <span id="groupVoiceTimer" class="voice-timer" style="display:none;">00:00</span>
                         <button id="groupVoiceBtn" class="voice-record-btn" title="Voice message" onclick="startVoiceRecording('group')" data-icon-btn="mic"></button>
+                        <button class="schedule-btn" title="Schedule message" onclick="showScheduleModal('group')" data-icon-btn="schedule">📅</button>
                         <button id="sendGroupBtn" class="send-btn" data-icon-btn="send"></button>
                     </div>
                 </div>
