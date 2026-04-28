@@ -484,19 +484,14 @@ window.addEventListener('load', () => {
 });
 
 // ── Vanish Mode Banner ────────────────────────────────────────
-function updateVanishBanner(friendUID) {
-    // Remove any existing banner
+let _vanishBannerUnsub = null;
+
+function _showVanishBanner(on) {
     const existing = document.getElementById('vanishModeBanner');
     if (existing) existing.remove();
-
-    if (!friendUID || !currentUser) return;
-    const chatId   = generateChatId(currentUser.uid, friendUID);
-    const vanishOn = localStorage.getItem(`vanishMode_${chatId}`) === 'true';
-    if (!vanishOn) return;
-
+    if (!on) return;
     const individualChat = document.getElementById('individualChat');
     if (!individualChat) return;
-
     const banner = document.createElement('div');
     banner.id        = 'vanishModeBanner';
     banner.className = 'vanish-mode-banner';
@@ -504,14 +499,38 @@ function updateVanishBanner(friendUID) {
         <span class="vanish-banner-icon">👻</span>
         <span class="vanish-banner-text">Vanish Mode is <strong>ON</strong> — messages will disappear when turned off</span>
     `;
-
-    // Insert banner right after chat-header
     const chatHeader = individualChat.querySelector('.chat-header');
     if (chatHeader && chatHeader.nextSibling) {
         individualChat.insertBefore(banner, chatHeader.nextSibling);
     } else {
         individualChat.prepend(banner);
     }
+}
+
+function updateVanishBanner(friendUID) {
+    // Unsubscribe previous listener
+    if (_vanishBannerUnsub) { _vanishBannerUnsub(); _vanishBannerUnsub = null; }
+
+    const existing = document.getElementById('vanishModeBanner');
+    if (existing) existing.remove();
+
+    if (!friendUID || !currentUser) return;
+    const chatId = generateChatId(currentUser.uid, friendUID);
+
+    // Listen to Firestore for real-time vanish state (syncs with other user)
+    _vanishBannerUnsub = db.collection('vanishMode').doc(chatId).onSnapshot(doc => {
+        // Only update banner if still in the same chat
+        if (chatWithUID !== friendUID) return;
+        const enabled = doc.exists && doc.data()?.enabled === true;
+        // Keep localStorage in sync
+        localStorage.setItem(`vanishMode_${chatId}`, enabled ? 'true' : 'false');
+        _showVanishBanner(enabled);
+
+        // If vanish was turned OFF by the other person, hard-delete vanish messages
+        if (!enabled && doc.exists && doc.data()?.toggledBy !== currentUser.uid) {
+            if (window.deleteVanishMessages) window.deleteVanishMessages(chatId);
+        }
+    });
 }
 window.updateVanishBanner = updateVanishBanner;
 
