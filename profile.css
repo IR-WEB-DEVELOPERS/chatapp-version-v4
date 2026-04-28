@@ -931,3 +931,41 @@
     color: var(--text-muted);
     font-size: 0.8rem;
 }
+
+/* ── Profile QR Section ──────────────────────────────────────── */
+.profile-qr-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0 4px;
+}
+.profile-qr-box {
+    background: #fff;
+    border-radius: 12px;
+    padding: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.profile-qr-box canvas, .profile-qr-box img {
+    display: block;
+    border-radius: 4px;
+}
+.profile-qr-actions {
+    display: flex;
+    gap: 10px;
+}
+.profile-qr-btn {
+    padding: 8px 22px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    background: var(--accent, #6366f1);
+    color: #fff;
+    transition: opacity 0.15s;
+}
+.profile-qr-btn:hover { opacity: 0.85; }
