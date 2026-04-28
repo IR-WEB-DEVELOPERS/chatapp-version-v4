@@ -608,7 +608,7 @@ class WebRTCManager {
                 if (btn) {
                     btn.style.background = '#718096';
                     btn.title = 'Share Screen';
-                    btn.textContent = '🖥️';
+                    btn.innerHTML = window.Icons ? window.Icons.get('monitor', 22) : '⬜';
                 }
                 window.showToast?.('Screen sharing stopped', 'info');
                 return false;
@@ -647,7 +647,7 @@ class WebRTCManager {
                 if (btn) {
                     btn.style.background = '#38a169';
                     btn.title = 'Stop Sharing';
-                    btn.textContent = '🛑';
+                    btn.innerHTML = window.Icons ? window.Icons.get('stopShare', 22) : '⬜';
                 }
                 window.showToast?.('Screen sharing started', 'success');
                 return true;
@@ -689,16 +689,23 @@ class WebRTCManager {
                 </div>
                 
                 <div class="call-controls">
-                    <button class="call-btn mute-audio" title="Mute Audio">🎤</button>
-                    ${isVideoCall ? `<button class="call-btn mute-video" title="Mute Video">📹</button>` : ''}
-                    ${isVideoCall && !this.isMobileDevice() ? `<button class="call-btn screen-share" title="Share Screen">🖥️</button>` : ''}
-                    ${isVideoCall ? `<button class="call-btn switch-camera" title="Switch Camera">🔄</button>` : ''}
-                    <button class="call-btn end-call" title="End Call">📞</button>
+                    <button class="call-btn mute-audio" title="Mute Audio"><span data-icon="micFill"></span></button>
+                    ${isVideoCall ? `<button class="call-btn mute-video" title="Mute Video"><span data-icon="videoFill"></span></button>` : ''}
+                    ${isVideoCall && !this.isMobileDevice() ? `<button class="call-btn screen-share" title="Share Screen"><span data-icon="monitor"></span></button>` : ''}
+                    ${isVideoCall ? `<button class="call-btn switch-camera" title="Switch Camera"><span data-icon="switchCam"></span></button>` : ''}
+                    <button class="call-btn end-call" title="End Call"><span data-icon="phoneEnd"></span></button>
                 </div>
             </div>
         `;
         
         document.body.insertAdjacentHTML('beforeend', callHTML);
+        // Hydrate data-icon spans with SVGs
+        if (window.Icons) {
+            document.querySelectorAll('#activeCall [data-icon]').forEach(el => {
+                const h = window.Icons.get(el.getAttribute('data-icon'), 22);
+                if (h) { el.innerHTML = h; el.removeAttribute('data-icon'); }
+            });
+        }
         this.setupCallUIEventListeners();
         this.updateLocalVideo();
         // NOTE: Timer is NOT started here — it starts in handleCallConnected() when peer connects
@@ -765,15 +772,23 @@ class WebRTCManager {
                         <p>Incoming ${isVideoCall ? 'Video' : 'Voice'} Call</p>
                     </div>
                     <div class="incoming-call-controls">
-                        <button class="call-btn accept-call">✓</button>
-                        <button class="call-btn decline-call">✕</button>
+                        <button class="call-btn accept-call"><span data-icon="phoneAccept"></span></button>
+                        <button class="call-btn decline-call"><span data-icon="phoneEnd"></span></button>
                     </div>
                 </div>
             </div>
         `;
         
         document.body.insertAdjacentHTML('beforeend', incomingCallHTML);
-        
+
+        // Hydrate data-icon spans
+        if (window.Icons) {
+            document.querySelectorAll('#incomingCall [data-icon]').forEach(el => {
+                const h = window.Icons.get(el.getAttribute('data-icon'), 22);
+                if (h) { el.innerHTML = h; el.removeAttribute('data-icon'); }
+            });
+        }
+
         const acceptBtn = document.querySelector('.accept-call');
         const declineBtn = document.querySelector('.decline-call');
         
@@ -882,7 +897,7 @@ class WebRTCManager {
                     chatId,
                     participants: [currentUser.uid, target],
                     sender: currentUser.uid,
-                    text: isVideo ? '📹 Video call' : '📞 Voice call',
+                    text: isVideo ? 'Video call' : 'Voice call',
                     callType: isVideo ? 'video' : 'voice',
                     duration: durationStr,
                     missed,
