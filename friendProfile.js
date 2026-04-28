@@ -210,68 +210,44 @@ const friendProfileViewer = (() => {
         grid.innerHTML = '<div class="fp-media-loading"><div class="fp-media-spinner"></div></div>';
 
         try {
-            // Fetch messages that are images, files, or voice
+            // Simple chatId-only query — no composite index needed
+            // Client-side filter picks out media messages
             const snap = await window.db.collection('messages')
                 .where('chatId', '==', chatId)
-                .where('type', 'in', ['file', 'voice', 'image'])
                 .orderBy('time', 'desc')
-                .limit(60)
+                .limit(300)
                 .get();
 
-            // Also fetch regular messages that have image URLs
-            const imgSnap = await window.db.collection('messages')
-                .where('chatId', '==', chatId)
-                .where('hasImage', '==', true)
-                .orderBy('time', 'desc')
-                .limit(30)
-                .get();
-
-            const seen  = new Set();
             const items = [];
-
-            const process = (doc) => {
-                if (seen.has(doc.id)) return;
-                seen.add(doc.id);
+            snap.forEach(doc => {
                 const d = doc.data();
+                if (!_isMediaMessage(d)) return;
                 const t = d.time?.toDate ? d.time.toDate() : new Date(d.time || 0);
                 items.push({ ...d, id: doc.id, _date: t });
-            };
-
-            snap.forEach(process);
-            imgSnap.forEach(process);
-
-            // Sort newest first
-            items.sort((a, b) => b._date - a._date);
+            });
 
             _mediaCache.set(chatId, items);
             _renderMediaGrid(grid, items, friendUID);
         } catch (e) {
             console.error('Media load error:', e);
-            // Fallback: try without 'in' operator (older Firestore)
-            try {
-                const snap = await window.db.collection('messages')
-                    .where('chatId', '==', chatId)
-                    .orderBy('time', 'desc')
-                    .limit(200)
-                    .get();
-
-                const items = [];
-                snap.forEach(doc => {
-                    const d = doc.data();
-                    if (d.type === 'file' || d.type === 'voice' || d.type === 'image' ||
-                        d.fileURL || d.imageURL || d.voiceURL || d.driveFileUrl) {
-                        const t = d.time?.toDate ? d.time.toDate() : new Date(d.time || 0);
-                        items.push({ ...d, id: doc.id, _date: t });
-                    }
-                });
-
-                _mediaCache.set(chatId, items);
-                _renderMediaGrid(grid, items, friendUID);
-            } catch (e2) {
-                console.error('Media fallback error:', e2);
-                _renderNoMedia(grid);
-            }
+            _renderNoMedia(grid);
         }
+    }
+
+    // ── Media message detector ────────────────────────────────
+    function _isMediaMessage(d) {
+        if (d.deletedForAll) return false;
+        return (
+            d.type === 'file'   ||
+            d.type === 'voice'  ||
+            d.type === 'image'  ||
+            !!d.fileURL         ||
+            !!d.imageURL        ||
+            !!d.voiceURL        ||
+            !!d.driveFileUrl    ||
+            !!d.driveThumbUrl   ||
+            !!d.fileData
+        );
     }
 
     // ── Render Media Grid ─────────────────────────────────────
@@ -288,21 +264,28 @@ const friendProfileViewer = (() => {
         const files  = [];
         const voices = [];
 
+        const IMAGE_EXTS = /\.(jpg|jpeg|png|gif|webp|heic|heif|svg|bmp|tiff?)$/i;
+        const IMAGE_MIME = /^image\//i;
+
         items.forEach(item => {
-            const url = item.driveFileUrl || item.fileURL || item.imageURL || item.voiceURL || item.fileData;
+            const url  = item.driveFileUrl || item.fileURL || item.imageURL || item.voiceURL || item.fileData;
             if (!url) return;
 
-            if (item.type === 'voice' || item.voiceURL) {
-                voices.push({ ...item, _url: url });
+            const name = item.fileName || item.name || '';
+            const mime = item.mimeType || item.type || '';
+
+            if (item.type === 'voice' || item.voiceURL || mime === 'voice') {
+                voices.push({ ...item, _url: url, _name: name });
             } else if (
                 item.type === 'image' ||
-                item.imageURL ||
-                (item.fileName && /\.(jpg|jpeg|png|gif|webp|heic|svg)$/i.test(item.fileName)) ||
-                (item.mimeType && item.mimeType.startsWith('image/'))
+                item.imageURL         ||
+                IMAGE_EXTS.test(name) ||
+                IMAGE_MIME.test(mime)
             ) {
-                images.push({ ...item, _url: url });
+                images.push({ ...item, _url: url, _name: name });
             } else {
-                files.push({ ...item, _url: url });
+                // All other files: PDF, DOCX, XLSX, ZIP, etc.
+                files.push({ ...item, _url: url, _name: name });
             }
         });
 
@@ -316,13 +299,14 @@ const friendProfileViewer = (() => {
             html += '<div class="fp-img-grid">';
             images.forEach(item => {
                 const dateStr = item._date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                const thumb   = item.driveThumbUrl || item._url;
                 html += `
                     <a class="fp-img-thumb" href="${window.escapeAttribute(item._url)}"
-                       target="_blank" rel="noopener" title="${window.escapeHTML(item.fileName || dateStr)}">
-                        <img src="${window.escapeAttribute(item._url)}"
-                             alt="${window.escapeHTML(item.fileName || 'Image')}"
+                       target="_blank" rel="noopener" title="${window.escapeHTML(item._name || dateStr)}">
+                        <img src="${window.escapeAttribute(thumb)}"
+                             alt="${window.escapeHTML(item._name || 'Image')}"
                              loading="lazy"
-                             onerror="this.parentElement.classList.add('fp-img-broken');this.parentElement.innerHTML='${(I ? I.get('image', 24) : '').replace(/'/g, "\\'")}'"
+                             onerror="this.parentElement.classList.add('fp-img-broken');this.style.display='none';"
                         >
                         <span class="fp-img-overlay">${I ? I.get('image', 16) : ''}</span>
                     </a>`;
@@ -336,13 +320,17 @@ const friendProfileViewer = (() => {
                 ${I ? I.get('paperclip', 14) : ''} Files (${files.length})
             </div>`;
             files.forEach(item => {
-                const name    = item.fileName || 'File';
+                const name    = item._name || 'File';
                 const dateStr = item._date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-                const ext     = name.split('.').pop().toUpperCase().slice(0, 4);
+                const ext     = name.includes('.') ? name.split('.').pop().toUpperCase().slice(0, 4) : 'FILE';
+                // Color-code by extension
+                const extColors = { PDF: '#ef4444', DOC: '#2563eb', DOCX: '#2563eb', XLS: '#16a34a',
+                    XLSX: '#16a34a', PPT: '#f97316', PPTX: '#f97316', ZIP: '#8b5cf6', RAR: '#8b5cf6' };
+                const extColor  = extColors[ext] || 'var(--accent, #6366f1)';
                 html += `
                     <a class="fp-file-row" href="${window.escapeAttribute(item._url)}"
                        target="_blank" rel="noopener">
-                        <div class="fp-file-icon">
+                        <div class="fp-file-icon" style="background:${extColor}22;color:${extColor};">
                             <span class="fp-file-ext">${window.escapeHTML(ext)}</span>
                         </div>
                         <div class="fp-file-info">
