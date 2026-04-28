@@ -201,17 +201,14 @@ const friendProfileViewer = (() => {
         const chatId = window.generateChatId?.(me, friendUID);
         if (!chatId || !window.db) { _renderNoMedia(grid); return; }
 
-        // Use cache if already loaded
         if (_mediaCache.has(chatId)) {
-            _renderMediaGrid(grid, _mediaCache.get(chatId), friendUID);
+            _renderMediaGrid(grid, _mediaCache.get(chatId));
             return;
         }
 
         grid.innerHTML = '<div class="fp-media-loading"><div class="fp-media-spinner"></div></div>';
 
         try {
-            // Simple chatId-only query — no composite index needed
-            // Client-side filter picks out media messages
             const snap = await window.db.collection('messages')
                 .where('chatId', '==', chatId)
                 .orderBy('time', 'desc')
@@ -227,7 +224,7 @@ const friendProfileViewer = (() => {
             });
 
             _mediaCache.set(chatId, items);
-            _renderMediaGrid(grid, items, friendUID);
+            _renderMediaGrid(grid, items);
         } catch (e) {
             console.error('Media load error:', e);
             _renderNoMedia(grid);
@@ -238,20 +235,21 @@ const friendProfileViewer = (() => {
     function _isMediaMessage(d) {
         if (d.deletedForAll) return false;
         return (
-            d.type === 'file'   ||
-            d.type === 'voice'  ||
-            d.type === 'image'  ||
-            !!d.fileURL         ||
-            !!d.imageURL        ||
-            !!d.voiceURL        ||
-            !!d.driveFileUrl    ||
-            !!d.driveThumbUrl   ||
+            d.type === 'file'  ||
+            d.type === 'voice' ||
+            d.type === 'image' ||
+            !!d.fileUrl        ||   // driveFileShare saves as fileUrl
+            !!d.audioUrl       ||   // voice messages save as audioUrl
+            !!d.downloadUrl    ||
+            !!d.imageURL       ||
+            !!d.voiceURL       ||
+            !!d.driveFileUrl   ||
             !!d.fileData
         );
     }
 
     // ── Render Media Grid ─────────────────────────────────────
-    function _renderMediaGrid(grid, items, friendUID) {
+    function _renderMediaGrid(grid, items) {
         const I = window.Icons;
 
         if (!items || items.length === 0) {
@@ -268,13 +266,14 @@ const friendProfileViewer = (() => {
         const IMAGE_MIME = /^image\//i;
 
         items.forEach(item => {
-            const url  = item.driveFileUrl || item.fileURL || item.imageURL || item.voiceURL || item.fileData;
+            // Real field names from driveFileShare.js: fileUrl, downloadUrl, audioUrl
+            const url  = item.fileUrl || item.downloadUrl || item.audioUrl || item.driveFileUrl || item.imageURL || item.voiceURL || item.fileData;
             if (!url) return;
 
             const name = item.fileName || item.name || '';
             const mime = item.mimeType || item.type || '';
 
-            if (item.type === 'voice' || item.voiceURL || mime === 'voice') {
+            if (item.type === 'voice' || item.audioUrl || item.voiceURL) {
                 voices.push({ ...item, _url: url, _name: name });
             } else if (
                 item.type === 'image' ||
@@ -299,11 +298,14 @@ const friendProfileViewer = (() => {
             html += '<div class="fp-img-grid">';
             images.forEach(item => {
                 const dateStr = item._date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-                const thumb   = item.driveThumbUrl || item._url;
+                // downloadUrl = direct link (usable as img src)
+                // fileUrl = Drive view link (open in browser)
+                const imgSrc  = item.downloadUrl || item.imageURL || item._url;
+                const openUrl = item.fileUrl || item.downloadUrl || item._url;
                 html += `
-                    <a class="fp-img-thumb" href="${window.escapeAttribute(item._url)}"
+                    <a class="fp-img-thumb" href="${window.escapeAttribute(openUrl)}"
                        target="_blank" rel="noopener" title="${window.escapeHTML(item._name || dateStr)}">
-                        <img src="${window.escapeAttribute(thumb)}"
+                        <img src="${window.escapeAttribute(imgSrc)}"
                              alt="${window.escapeHTML(item._name || 'Image')}"
                              loading="lazy"
                              onerror="this.parentElement.classList.add('fp-img-broken');this.style.display='none';"
@@ -328,7 +330,7 @@ const friendProfileViewer = (() => {
                     XLSX: '#16a34a', PPT: '#f97316', PPTX: '#f97316', ZIP: '#8b5cf6', RAR: '#8b5cf6' };
                 const extColor  = extColors[ext] || 'var(--accent, #6366f1)';
                 html += `
-                    <a class="fp-file-row" href="${window.escapeAttribute(item._url)}"
+                    <a class="fp-file-row" href="${window.escapeAttribute(item.fileUrl || item.downloadUrl || item._url)}"
                        target="_blank" rel="noopener">
                         <div class="fp-file-icon" style="background:${extColor}22;color:${extColor};">
                             <span class="fp-file-ext">${window.escapeHTML(ext)}</span>
@@ -352,7 +354,7 @@ const friendProfileViewer = (() => {
                 const dur     = item.duration ? `${Math.round(item.duration)}s` : '';
                 html += `
                     <div class="fp-voice-row">
-                        <button class="fp-voice-play" data-src="${window.escapeAttribute(item._url)}"
+                        <button class="fp-voice-play" data-src="${window.escapeAttribute(item.audioUrl || item._url)}"
                                 data-idx="${idx}" title="Play voice message">
                             ${I ? I.get('play', 16) : '▶'}
                         </button>
