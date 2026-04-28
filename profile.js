@@ -677,23 +677,31 @@ const storiesManager = (() => {
                     <!-- Content -->
                     <div class="story-content" id="storyContent">
                         ${story.type === 'instagram'
-                            ? `<div class="story-insta-embed" id="storyInstaEmbed">
-                                   ${story.embedHtml
-                                       ? story.embedHtml
-                                       : story.thumbnailUrl
-                                           ? `<div class="story-insta-thumb-wrap">
-                                                  <img src="${escapeAttribute(story.thumbnailUrl)}" class="story-insta-thumb-img" alt="Instagram">
-                                                  <a href="${escapeAttribute(story.instaURL)}" target="_blank" rel="noopener" class="story-insta-play-btn">
-                                                      <span class="story-insta-play-icon">▶</span>
-                                                  </a>
-                                              </div>`
-                                           : `<div class="story-insta-no-thumb">
-                                                  <a href="${escapeAttribute(story.instaURL)}" target="_blank" rel="noopener" class="story-insta-open-btn">
-                                                      📱 Instagram లో చూడు
-                                                  </a>
-                                              </div>`
-                                   }
-                               </div>`
+                            ? (() => {
+                                  const _getEmbedSrc = (url) => {
+                                      const m = url.match(/instagram\.com\/(p|reel|tv)\/([\w-]+)/);
+                                      return m ? `https://www.instagram.com/${m[1]}/${m[2]}/embed/` : null;
+                                  };
+                                  const embedSrc = _getEmbedSrc(story.instaURL);
+                                  return `<div class="story-insta-embed" id="storyInstaEmbed">
+                                      ${embedSrc
+                                          ? `<iframe
+                                                 src="${escapeAttribute(embedSrc)}"
+                                                 class="story-insta-iframe"
+                                                 frameborder="0"
+                                                 scrolling="no"
+                                                 allowtransparency="true"
+                                                 allowfullscreen="true"
+                                                 allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+                                             ></iframe>`
+                                          : `<div class="story-insta-no-thumb">
+                                                 <a href="${escapeAttribute(story.instaURL)}" target="_blank" rel="noopener" class="story-insta-open-btn">
+                                                     📱 Instagram లో చూడు
+                                                 </a>
+                                             </div>`
+                                      }
+                                  </div>`;
+                              })()
                             : story.type === 'image'
                             ? `<img class="story-content-image"
                                     src="${escapeAttribute(story.imageURL)}"
@@ -743,11 +751,13 @@ const storiesManager = (() => {
                 }
             }
 
-            // Auto-advance
-            timer = setTimeout(() => {
-                if (idx + 1 < group.stories.length) _render(idx + 1);
-                else overlay.remove();
-            }, DURATION);
+            // Auto-advance — skip timer for Instagram reels (user watches at own pace)
+            if (story.type !== 'instagram') {
+                timer = setTimeout(() => {
+                    if (idx + 1 < group.stories.length) _render(idx + 1);
+                    else overlay.remove();
+                }, DURATION);
+            }
 
             // Binds
             document.getElementById('storyViewerClose').onclick = () => { clearTimeout(timer); overlay.remove(); };
