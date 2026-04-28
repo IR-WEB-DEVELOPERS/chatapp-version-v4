@@ -329,6 +329,23 @@ app.get('/vapid-public-key', (req, res) => {
     res.json({ key });
 });
 
+// ── Firebase client config — safe to expose, served from env vars ──
+app.get('/firebase-config', (req, res) => {
+    const cfg = {
+        apiKey:            process.env.FIREBASE_API_KEY,
+        authDomain:        process.env.FIREBASE_AUTH_DOMAIN,
+        projectId:         process.env.FIREBASE_PROJECT_ID,
+        storageBucket:     process.env.FIREBASE_STORAGE_BUCKET,
+        messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+        appId:             process.env.FIREBASE_APP_ID,
+        measurementId:     process.env.FIREBASE_MEASUREMENT_ID,
+    };
+    if (!cfg.apiKey || !cfg.projectId) {
+        return res.status(503).json({ error: 'Firebase client config not set in env' });
+    }
+    res.json(cfg);
+});
+
 // ── SPA catch-all — ONLY for navigation requests, not missing assets ──
 // This prevents /sw.js, /manifest.json, and module JS from returning chat.html.
 app.use((req, res, next) => {
