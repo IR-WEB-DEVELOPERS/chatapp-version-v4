@@ -368,6 +368,47 @@ app.get('/firebase-config', (req, res) => {
     res.json(cfg);
 });
 
+// ── Claude AI proxy — keeps ANTHROPIC_API_KEY off the browser ────────────
+app.post('/api/ai-chat', async (req, res) => {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: 'AI not configured' });
+
+    const { messages, system } = req.body;
+    if (!Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({ error: 'messages array required' });
+    }
+
+    try {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 1000,
+                system: system || '',
+                messages
+            })
+        });
+
+        if (!response.ok) {
+            const err = await response.text();
+            console.error('Anthropic API error:', response.status, err);
+            return res.status(response.status).json({ error: 'AI request failed' });
+        }
+
+        const data = await response.json();
+        const text = data.content?.find(b => b.type === 'text')?.text || '...';
+        res.json({ text });
+    } catch (err) {
+        console.error('AI proxy error:', err.message);
+        res.status(500).json({ error: 'AI proxy error' });
+    }
+});
+
 // ── Static files — registered after API routes so dynamic endpoints win ──
 app.use(express.static(path.join(__dirname)));
 
