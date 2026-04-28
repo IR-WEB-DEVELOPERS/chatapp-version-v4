@@ -84,6 +84,18 @@ const profileManager = (() => {
                     </div>
 
                     <button class="profile-save-btn" id="profileSaveBtn">Save Changes</button>
+
+                    <!-- QR Code Section -->
+                    <hr class="profile-divider" style="margin-top:20px;">
+                    <div class="profile-field">
+                        <label>My QR Code</label>
+                        <div class="profile-qr-wrap" id="profileQrWrap">
+                            <div class="profile-qr-box" id="profileQrBox"></div>
+                            <div class="profile-qr-actions">
+                                <button class="profile-qr-btn" id="profileQrShareBtn">Share QR</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         `;
@@ -168,6 +180,22 @@ const profileManager = (() => {
 
         // Save
         document.getElementById('profileSaveBtn').onclick = _save;
+
+        // QR Code for own profile
+        const user  = window.currentUserData || {};
+        const auth  = window.currentUser || {};
+        const myUID = auth.uid;
+        if (myUID && window.QRManager) {
+            const box = document.getElementById('profileQrBox');
+            if (box) {
+                const qrText = window.QRManager.profileQRData(myUID, user.name || auth.displayName || 'Me');
+                window.QRManager.generateQR(box, qrText, { size: 180 });
+            }
+            document.getElementById('profileQrShareBtn').onclick = () => {
+                const b = document.getElementById('profileQrBox');
+                window.QRManager.shareQR(b, user.name || auth.displayName || 'Me');
+            };
+        }
     }
 
     async function _save() {
