@@ -148,34 +148,37 @@ function configureWebPush() {
     return true;
 }
 
-// Brevo HTTP API — no SMTP, works on Render free tier
-async function sendOtpEmail({ to, code, purpose }) {
-    const apiKey = process.env.BREVO_API_KEY;
-    const from   = process.env.SMTP_FROM || 'chatappsupport@irwebdevelopers.com';
-    if (!apiKey) {
-        console.warn('BREVO_API_KEY not set');
-        return { sent: false, reason: 'BREVO_API_KEY_NOT_CONFIGURED' };
+function getMailer() {
+    if (!nodemailer) return null;
+    if (process.env.SMTP_URL) {
+        return nodemailer.createTransport(process.env.SMTP_URL);
     }
-    const label = purpose === 'privacy-reset' ? 'private chats' : 'login';
-    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-        method: 'POST',
-        headers: {
-            'api-key': apiKey,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-            sender:      { email: from, name: 'IRchat' },
-            to:          [{ email: to }],
-            subject:     `IRchat ${label} OTP`,
-            htmlContent: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px;border:1px solid #e8ecf0;border-radius:12px;"><h2 style="color:#6366f1;">IRchat</h2><p>Your ${label} OTP is:</p><div style="font-size:2.5rem;font-weight:800;letter-spacing:8px;color:#6366f1;padding:16px 0;">${code}</div><p style="color:#6b7280;font-size:0.85rem;">Expires in 10 minutes. Do not share.</p></div>`,
-            textContent: `Your IRchat ${label} OTP is ${code}. Expires in 10 minutes.`
-        })
+    if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+        return null;
+    }
+    return nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT || 587),
+        secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || Number(process.env.SMTP_PORT) === 465,
+        auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS
+        }
     });
-    if (!response.ok) {
-        const err = await response.text();
-        throw new Error(`Brevo API error: ${response.status} — ${err}`);
-    }
+}
+
+async function sendOtpEmail({ to, code, purpose }) {
+    const mailer = getMailer();
+    if (!mailer) return { sent: false, reason: 'SMTP_NOT_CONFIGURED' };
+
+    const label = purpose === 'privacy-reset' ? 'private chats' : 'login';
+    await mailer.sendMail({
+        from: process.env.SMTP_FROM || process.env.SMTP_USER,
+        to,
+        subject: `EduChat ${label} OTP`,
+        text: `Your EduChat ${label} OTP is ${code}. It expires in 10 minutes.`,
+        html: `<p>Your EduChat ${label} OTP is <strong>${code}</strong>.</p><p>It expires in 10 minutes.</p>`
+    });
     return { sent: true };
 }
 
@@ -314,6 +317,49 @@ app.post('/verify-otp', async (req, res) => {
 });
 
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
+
+// ── ICE Servers endpoint — returns TURN credentials for WebRTC ──
+// Supports Metered.ca API (set METERED_API_KEY env var) or falls back to free public servers
+app.get('/ice-servers', async (req, res) => {
+    const meteredKey = process.env.METERED_API_KEY;
+
+    // If Metered API key is set, fetch time-limited credentials
+    if (meteredKey) {
+        try {
+            const r = await fetch(`https://irwebdevelopers.metered.live/api/v1/turn/credentials?apiKey=${meteredKey}`);
+            if (r.ok) {
+                const servers = await r.json();
+                return res.json({ iceServers: servers });
+            }
+        } catch (e) {
+            console.warn('Metered TURN fetch failed:', e.message);
+        }
+    }
+
+    // Fallback: reliable public TURN servers
+    res.json({
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun.cloudflare.com:3478' },
+            {
+                urls: [
+                    'turn:openrelay.metered.ca:80',
+                    'turn:openrelay.metered.ca:443',
+                    'turn:openrelay.metered.ca:443?transport=tcp',
+                    'turns:openrelay.metered.ca:443'
+                ],
+                username: 'openrelayproject',
+                credential: 'openrelayproject'
+            },
+            {
+                urls: ['turn:freestun.net:3478', 'turns:freestun.net:5349'],
+                username: 'free',
+                credential: 'free'
+            }
+        ]
+    });
+});
 
 // ── Instagram oEmbed proxy ────────────────────────────────────
 // Browser can't call Instagram oEmbed directly (CORS), so we proxy it here.
