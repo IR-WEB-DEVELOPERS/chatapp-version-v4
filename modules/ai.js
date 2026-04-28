@@ -30,27 +30,23 @@ user is speaking (Telugu, Hindi, English, etc.).`;
         catch {}
     }
 
-    // ── Call Anthropic API ────────────────────────────────────
+    // ── Call Claude via server proxy (keeps API key off browser) ─────────
     async function callClaude(history) {
         const messages = history.map(m => ({
             role: m.role,
             content: m.content
         }));
 
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
+        const res = await fetch('/api/ai-chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
-                max_tokens: 1000,
-                system: SYSTEM_PROMPT,
-                messages
-            })
+            body: JSON.stringify({ system: SYSTEM_PROMPT, messages })
         });
 
-        if (!res.ok) throw new Error(`API error ${res.status}`);
+        if (!res.ok) throw new Error(`Proxy error ${res.status}`);
         const data = await res.json();
-        return data.content?.find(b => b.type === 'text')?.text || '...';
+        if (data.error) throw new Error(data.error);
+        return data.text || '...';
     }
 
     // ── Escape helpers (reuse app's if available) ─────────────
