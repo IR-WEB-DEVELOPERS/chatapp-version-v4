@@ -129,26 +129,13 @@ function _renderFriendsList() {
                         ${unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : ''}
                     </div>
                 </div>
-                <span class="chat-more-btn"
-                    data-uid="${escapeAttribute(friendUID)}"
-                    data-name="${escapeAttribute(friendData.name || 'User')}"
-                    title="Chat options">...</span>
             </button>
         `;
     }
 
     friendsList.innerHTML = html;
     friendsList.querySelectorAll('.chat-item').forEach(item => {
-        item.addEventListener('click', (e) => {
-            if (e.target.closest('.chat-more-btn')) return;
-            openChat(item.dataset.uid);
-        });
-    });
-    friendsList.querySelectorAll('.chat-more-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.preventDefault(); e.stopPropagation();
-            openChatOptionsMenu(btn.dataset.uid, btn.dataset.name);
-        });
+        item.addEventListener('click', () => openChat(item.dataset.uid));
     });
 }
 
