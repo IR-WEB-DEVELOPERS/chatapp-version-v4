@@ -318,6 +318,32 @@ app.post('/verify-otp', async (req, res) => {
 
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
+// ── Instagram oEmbed proxy ────────────────────────────────────
+// Browser can't call Instagram oEmbed directly (CORS), so we proxy it here.
+app.get('/instagram-embed', async (req, res) => {
+    const url = req.query.url;
+    if (!url || !/instagram\.com\/(p|reel|tv)\/[\w-]+/.test(url)) {
+        return res.status(400).json({ error: 'Invalid Instagram URL' });
+    }
+    try {
+        const oEmbedURL = `https://graph.facebook.com/v18.0/instagram_oembed?url=${encodeURIComponent(url)}&maxwidth=400&fields=thumbnail_url,html,title&access_token=${process.env.INSTAGRAM_TOKEN || ''}`;
+        const response = await fetch(oEmbedURL);
+        if (!response.ok) {
+            // Fallback: return just the URL info without embed HTML
+            return res.json({ thumbnailUrl: null, embedHtml: null, title: 'Instagram Reel' });
+        }
+        const data = await response.json();
+        return res.json({
+            thumbnailUrl: data.thumbnail_url || null,
+            embedHtml:    data.html           || null,
+            title:        data.title          || 'Instagram Reel',
+        });
+    } catch (err) {
+        console.error('Instagram oEmbed error:', err.message);
+        return res.json({ thumbnailUrl: null, embedHtml: null, title: 'Instagram Reel' });
+    }
+});
+
 // ── VAPID public key endpoint — clients read this instead of hardcoding ──
 app.get('/vapid-public-key', (req, res) => {
     const key = process.env.VAPID_PUBLIC_KEY;
