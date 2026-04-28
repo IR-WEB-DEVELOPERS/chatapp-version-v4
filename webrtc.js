@@ -25,16 +25,32 @@ class WebRTCManager {
         // BUG 2 FIX: Queue for tracks that arrived before DOM was ready
         this._pendingRemoteTracks = [];
         
-        // Better ICE servers configuration
+        // ICE servers configuration — STUN + TURN (TURN is required for users behind strict NAT/firewalls)
+        // FIX: Added free public TURN servers. For production, use your own TURN (e.g., Metered, Twilio, Coturn).
         this.iceServers = {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
                 { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' }
+                // Free TURN servers (Metered — rate limited but good for testing)
+                {
+                    urls: 'turn:a.relay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:a.relay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:a.relay.metered.ca:443?transport=tcp',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
             ],
-            iceCandidatePoolSize: 10
+            iceCandidatePoolSize: 10,
+            iceTransportPolicy: 'all'  // 'relay' గా మారిస్తే force TURN — debugging కి useful
         };
         
         this.mediaConstraints = {
@@ -433,17 +449,25 @@ class WebRTCManager {
     }
 
     async handleAnswer(answer) {
-        console.log('✅ Handling answer, current signaling state:', this.signalingState);
+        // FIX: Use peerConnection.signalingState directly — this.signalingState is stale
+        // when the state update fires before handleAnswer is called.
+        const actualState = this.peerConnection ? this.peerConnection.signalingState : 'closed';
+        console.log('✅ Handling answer, actual PC signaling state:', actualState);
         
         if (!this.peerConnection) {
             console.error('❌ No peer connection available for answer');
             return;
         }
+
+        // Already stable → remote description is set (connection established). Skip silently.
+        if (actualState === 'stable') {
+            console.log('ℹ️ Answer received but state is already stable — connection already established, ignoring duplicate.');
+            return;
+        }
         
-        // Check if we're in the right state to set remote description
-        if (this.signalingState !== 'have-local-offer') {
-            console.warn('⚠️ Not in correct state for answer. Current state:', this.signalingState);
-            console.log('📥 Queueing answer for later processing');
+        // Not yet in have-local-offer state → queue for when the state arrives
+        if (actualState !== 'have-local-offer') {
+            console.warn('⚠️ Unexpected state for answer:', actualState, '— queueing');
             this.pendingAnswer = answer;
             return;
         }
@@ -459,7 +483,7 @@ class WebRTCManager {
             console.log('🔄 Setting remote description (answer)...');
             
             await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-            console.log('✅ Remote description set successfully, new signaling state:', this.peerConnection.signalingState);
+            console.log('✅ Remote description set successfully, new state:', this.peerConnection.signalingState);
             
             // Process any pending ICE candidates
             await this.processPendingICECandidates();
@@ -467,14 +491,8 @@ class WebRTCManager {
             this.pendingAnswer = null;
             
         } catch (error) {
-            console.error('❌ Error setting remote description:', error);
-            
-            if (error.toString().includes('wrong state') || error.toString().includes('stable')) {
-                console.log('🔄 Answer arrived too late, connection already established');
-                // This is often not a critical error - the connection might already be working
-            } else {
-                throw error;
-            }
+            console.error('❌ Error setting remote description (answer):', error);
+            // Non-fatal if connection already working
         } finally {
             this.isSettingRemoteDescription = false;
         }
@@ -494,31 +512,34 @@ class WebRTCManager {
     }
 
     async handleICECandidate(candidate) {
+        // FIX: If no peer connection yet, always queue — never discard
         if (!this.peerConnection) {
-            console.warn('❌ No peer connection for ICE candidate');
+            console.warn('📥 Queueing ICE candidate — peer connection not ready yet');
             this.pendingICECandidates.push(candidate);
             return;
         }
         
+        // FIX: If remote description is not set yet, queue — addIceCandidate will fail otherwise
+        if (!this.peerConnection.remoteDescription) {
+            console.log('📥 Queueing ICE candidate — remote description not set yet');
+            this.pendingICECandidates.push(candidate);
+            return;
+        }
+
         try {
-            // Wait a bit if we're currently setting remote description
+            // Wait if remote description is being set right now
             if (this.isSettingRemoteDescription) {
-                console.log('⏳ Delaying ICE candidate due to ongoing remote description setting');
-                setTimeout(() => this.handleICECandidate(candidate), 100);
+                console.log('⏳ Delaying ICE candidate — remote description being set');
+                this.pendingICECandidates.push(candidate);
                 return;
             }
             
-            await this.peerConnection.addIceCandidate(candidate);
+            await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
             console.log('✅ ICE candidate added');
             
         } catch (error) {
-            console.error('❌ Error adding ICE candidate:', error);
-            
-            // If we get a "remote description not set" error, queue the candidate
-            if (error.toString().includes('remote description') || !this.peerConnection.remoteDescription) {
-                console.log('📥 Queuing ICE candidate (remote description not ready)');
-                this.pendingICECandidates.push(candidate);
-            }
+            // Only log — stale candidates happen normally
+            console.warn('⚠️ ICE candidate add failed (may be stale):', error.message);
         }
     }
 
@@ -532,7 +553,7 @@ class WebRTCManager {
         
         for (const candidate of candidatesToProcess) {
             try {
-                await this.peerConnection.addIceCandidate(candidate);
+                await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
                 console.log('✅ Processed queued ICE candidate');
             } catch (error) {
                 console.error('❌ Error processing queued ICE candidate:', error);
