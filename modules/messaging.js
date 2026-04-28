@@ -21,8 +21,8 @@ function renderMessageActions(msg, isSent) {
     const I = window.Icons;
     const replyIcon  = I ? I.get('reply',   16) : '↩';
     const fwdIcon    = I ? I.get('forward', 16) : '↪';
-    const pinIcon    = isPinned ? (I ? I.get('pinFill',16) : '📌') : (I ? I.get('pin',16) : '📍');
-    const trashIcon  = I ? I.get('trash',   16) : '🗑';
+    const pinIcon    = isPinned ? (I ? I.get('pinFill',16) : '⊕') : (I ? I.get('pin',16) : '⊕');
+    const trashIcon  = I ? I.get('trash',   16) : '[del]';
     return `
         <div class="msg-actions">
             <button class="msg-action-btn" data-action="reply"   data-id="${safeId}" title="Reply">${replyIcon}</button>
@@ -53,8 +53,8 @@ function renderSeenTicks(msg, isSent) {
             : `<span class="msg-ticks ticks-delivered" title="Delivered">${I.get('check', 14)}</span>`;
     }
     return seen
-        ? '<span class="msg-ticks ticks-seen" title="Seen">✓✓</span>'
-        : '<span class="msg-ticks ticks-delivered" title="Delivered">✓✓</span>';
+        ? '<span class="msg-ticks ticks-seen">✓✓</span>'
+        : '<span class="msg-ticks ticks-delivered">✓</span>';
 }
 
 function renderVoiceMessage(msg) {
@@ -92,7 +92,7 @@ function buildMessageHTML(msg, isSent, isGroup) {
     const dateLabel  = getDateLabel(time);
 
     if (msg.type === 'call') {
-        const callIcon = msg.callType === 'video' ? '📹' : '📞';
+        const callIcon = msg.callType === 'video' ? (I ? I.get('callVideo',16) : '[video]') : (I ? I.get('callPhone',16) : '[call]');
         const missed   = msg.missed ? ' · Missed' : (msg.duration ? ` · ${msg.duration}` : '');
         const who      = isSent ? 'Outgoing call' : 'Incoming call';
         return { html: `
@@ -109,7 +109,7 @@ function buildMessageHTML(msg, isSent, isGroup) {
     if (msg.deletedForAll) {
         return { html: `
             <div class="message ${isSent ? 'sent' : 'received'} deleted-msg">
-                <div class="message-text deleted-text">🚫 This message was deleted</div>
+                <div class="message-text deleted-text"><span class="del-icon"></span> This message was deleted</div>
                 <div class="message-time">${timeString}</div>
             </div>
         `, dateLabel };
@@ -130,7 +130,7 @@ function buildMessageHTML(msg, isSent, isGroup) {
 
     const I           = window.Icons;
     const pinnedBadge = msg.pinned
-        ? `<span class="pinned-badge">${I ? I.get('pinFill', 12) : '📌'}</span>`
+        ? `<span class="pinned-badge">${I ? I.get('pinFill', 12) : ''}</span>`
         : '';
     const senderLabel = (isGroup && !isSent && msg.sender !== 'system')
         ? `<div class="message-sender">${escapeHTML(msg.senderName || 'User')}</div>` : '';
@@ -283,7 +283,7 @@ async function loadMessages() {
                         }
                         getUserData(newest.sender).then(senderData => {
                             toastManager.show({
-                                icon: '💬', title: senderData?.name || 'New Message',
+                                icon: null, type: 'message', title: senderData?.name || 'New Message',
                                 body: newest.text, type: 'message', onClick: () => {}
                             });
                         });
@@ -361,7 +361,7 @@ async function loadGroupMessages() {
                         }
                         const groupChatNameEl = document.getElementById('groupChatName');
                         toastManager.show({
-                            icon: '👥',
+                            icon: null, type: 'message',
                             title: groupChatNameEl?.textContent || 'Group Message',
                             body: `${newest.senderName || 'Someone'}: ${newest.text}`,
                             type: 'group'
@@ -520,7 +520,7 @@ async function loadArchivedMessages(chatId, type) {
     const archBtn = document.getElementById('loadArchiveBtn');
     if (archBtn) { archBtn.textContent = 'Fetching from Drive...'; archBtn.disabled = true; }
 
-    showToast('📂 Loading archived messages from Drive...', 'info');
+    showToast('Loading archived messages from Drive...', 'info');
 
     const archived = await autoBackup.fetchArchived(chatId, type);
 
@@ -538,7 +538,7 @@ async function loadArchivedMessages(chatId, type) {
     else                  displayMessages(allMsgs);
 
     if (archBtn) archBtn.style.display = 'none';
-    showToast(`✅ Loaded ${archived.length} archived messages`, 'success');
+    showToast(`Loaded ${archived.length} archived messages`, 'success');
 }
 
 // ── Send direct message ──────────────────────────────────────
@@ -767,7 +767,7 @@ async function showForwardModal(msg) {
                 });
             } catch (e) { console.error(e); }
             overlay.remove();
-            toastManager.show({ icon: '↪', title: 'Forwarded', body: `Message forwarded to ${btn.textContent}`, type: 'message', duration: 2500 });
+            toastManager.show({ icon: null, type: 'success', title: 'Forwarded', body: `Message forwarded to ${btn.textContent}`, type: 'message', duration: 2500 });
         };
     });
     overlay.querySelector('.delete-cancel').onclick = () => overlay.remove();
@@ -847,7 +847,7 @@ async function togglePinMessage(msgId, chatType, shouldPin) {
         pinned.forEach(doc => batch.update(doc.ref, { pinned: false }));
         if (shouldPin) batch.update(db.collection(collection).doc(msgId), { pinned: true });
         await batch.commit();
-        toastManager.show({ icon: shouldPin ? '📌' : '📍', title: shouldPin ? 'Message pinned' : 'Message unpinned', body: '', type: 'info', duration: 2000 });
+        toastManager.show({ icon: null, type: shouldPin ? 'success' : 'info', title: shouldPin ? 'Message pinned' : 'Message unpinned', body: '', type: 'info', duration: 2000 });
     } catch (e) { console.error('Pin error:', e); }
 }
 
@@ -904,7 +904,7 @@ async function startVoiceRecording(chatType) {
         mediaRecorder.start(100);
 
         const btn = document.getElementById(chatType === 'group' ? 'groupVoiceBtn' : 'voiceBtn');
-        if (btn) { btn.classList.add('recording'); btn.title = 'Stop recording'; btn.textContent = '⏹'; }
+        if (btn) { btn.classList.add('recording'); btn.title = 'Stop recording'; btn.innerHTML = window.Icons ? window.Icons.get('micStop', 20) : '[stop]'; }
 
         const timerEl = document.getElementById(chatType === 'group' ? 'groupVoiceTimer' : 'voiceTimer');
         if (timerEl) timerEl.style.display = 'inline';
@@ -928,7 +928,7 @@ function stopVoiceRecording(chatType) {
     mediaRecorder.stop();
 
     const btn = document.getElementById(chatType === 'group' ? 'groupVoiceBtn' : 'voiceBtn');
-    if (btn) { btn.classList.remove('recording'); btn.title = 'Voice message'; btn.innerHTML = window.Icons ? window.Icons.get('mic', 20) : '🎤'; }
+    if (btn) { btn.classList.remove('recording'); btn.title = 'Voice message'; btn.innerHTML = window.Icons ? window.Icons.get('mic', 20) : '[mic]'; }
 
     const timerEl = document.getElementById(chatType === 'group' ? 'groupVoiceTimer' : 'voiceTimer');
     if (timerEl) { timerEl.style.display = 'none'; timerEl.textContent = '00:00'; }
