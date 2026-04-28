@@ -169,13 +169,18 @@ async function uploadFileToDrive(file, ctx) {
             );
 
         // Send as file message
+        const isImageUpload = (fileData.mimeType || '').startsWith('image/');
         const fileMsg = {
             type: 'file',
             fileName: fileData.name,
             fileSize: fileData.size,
             fileMime: fileData.mimeType,
-            fileUrl:  fileData.webViewLink,        // view link
+            fileUrl:  fileData.webViewLink,        // view link (HTML page)
             downloadUrl: fileData.webContentLink,  // direct download
+            // thumbnailUrl: embeddable image URL for <img> tags (no CORS/auth issues)
+            thumbnailUrl: isImageUpload
+                ? `https://drive.google.com/thumbnail?id=${fileData.id}&sz=w800`
+                : null,
             text: '',
             time: new Date(),
         };
@@ -248,13 +253,25 @@ function renderFileMessage(msg, isSent) {
     const safeFileUrl     = escapeAttribute(msg.fileUrl || '#');
     const safeDownloadUrl = escapeAttribute(msg.downloadUrl || msg.fileUrl || '#');
 
+    // For images: prefer thumbnailUrl (embeddable), else derive from fileUrl id
+    let safeImgSrc = safeDownloadUrl;
+    if (isImage) {
+        if (msg.thumbnailUrl) {
+            safeImgSrc = escapeAttribute(msg.thumbnailUrl);
+        } else {
+            // Derive file ID from fileUrl and use thumbnail API
+            const idMatch = (msg.fileUrl || '').match(/\/d\/([^/]+)\//);
+            if (idMatch) safeImgSrc = escapeAttribute(`https://drive.google.com/thumbnail?id=${idMatch[1]}&sz=w800`);
+        }
+    }
+
     if (isImage) {
         // Inline image preview
         return `
             <div class="file-msg-wrap">
                 <a href="${safeFileUrl}" target="_blank" rel="noopener">
                     <img 
-                        src="${safeDownloadUrl}"
+                        src="${safeImgSrc}"
                         alt="${safeFileName}"
                         class="file-msg-image"
                         loading="lazy"
