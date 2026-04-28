@@ -223,6 +223,14 @@ async function openChat(friendUID) {
     markChatAsRead(generateChatId(currentUser.uid, friendUID));
     listenTypingIndicator();
 
+    // Wire 3-dot menu in chat header
+    const chatMoreBtn = document.getElementById('chatMoreBtn');
+    if (chatMoreBtn) {
+        chatMoreBtn.onclick = () => {
+            openChatOptionsMenu(friendUID, friendData.name || 'User');
+        };
+    }
+
     const msgInput = document.getElementById('msg');
     if (msgInput) msgInput.oninput = onTypingInput;
 }
