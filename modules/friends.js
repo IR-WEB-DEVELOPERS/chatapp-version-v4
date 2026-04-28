@@ -562,10 +562,17 @@ async function openChatOptionsMenu(friendUID, friendName = 'User') {
     const isPrivate = window.privateChatsManager?.isPrivate(friendUID);
     const privateText = isPrivate ? 'Remove from Private Chats' : 'Move to Private Chats';
 
-    // Check current vanish mode state for this chat
+    // Check current vanish mode state — read from Firestore (source of truth)
     const chatId = generateChatId(currentUser.uid, friendUID);
     const vanishKey = `vanishMode_${chatId}`;
-    const isVanishOn = localStorage.getItem(vanishKey) === 'true';
+    let isVanishOn = localStorage.getItem(vanishKey) === 'true';
+    try {
+        const vanishDoc = await db.collection('vanishMode').doc(chatId).get();
+        if (vanishDoc.exists) {
+            isVanishOn = vanishDoc.data()?.enabled === true;
+            localStorage.setItem(vanishKey, isVanishOn ? 'true' : 'false');
+        }
+    } catch(e) { /* fallback to localStorage */ }
     const vanishText = isVanishOn ? '👻 Vanish Mode: ON  (tap to turn off)' : '👻 Vanish Mode: OFF (tap to turn on)';
 
     const action = await new Promise((resolve) => {
@@ -604,8 +611,19 @@ async function openChatOptionsMenu(friendUID, friendName = 'User') {
         const nowOn = !isVanishOn;
         localStorage.setItem(vanishKey, nowOn ? 'true' : 'false');
 
+        // Sync vanish state to Firestore so the other person sees it too
+        try {
+            await db.collection('vanishMode').doc(chatId).set({
+                enabled: nowOn,
+                toggledBy: currentUser.uid,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        } catch(e) {
+            console.error('Vanish mode Firestore sync error:', e);
+        }
+
         if (!nowOn) {
-            // Vanish mode OFF — delete all messages sent during vanish mode
+            // Vanish mode OFF — hard-delete all messages sent during vanish mode
             await deleteVanishMessages(chatId);
         }
 
@@ -640,7 +658,7 @@ async function openChatOptionsMenu(friendUID, friendName = 'User') {
     }
 }
 
-// ── Vanish Mode — delete messages flagged with vanishMode:true ─
+// ── Vanish Mode — hard-delete messages flagged with vanishMode:true ─
 async function deleteVanishMessages(chatId) {
     if (!currentUser) return;
     try {
@@ -650,7 +668,7 @@ async function deleteVanishMessages(chatId) {
             .get();
         const batch = db.batch();
         snap.docs.forEach(doc => {
-            batch.update(doc.ref, { deletedForAll: true });
+            batch.delete(doc.ref);
         });
         if (!snap.empty) await batch.commit();
     } catch (e) {
