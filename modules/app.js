@@ -98,7 +98,7 @@ function startListeners() {
                         const req = change.doc.data();
                         getUserData(req.from).then(senderData => {
                             toastManager.show({
-                                icon: '🤝', title: 'Friend Request',
+                                icon: null, type: 'message', title: 'Friend Request',
                                 body: `${senderData?.name || 'Someone'} sent you a friend request`,
                                 type: 'request',
                                 onClick: () => switchTab('friends')
@@ -197,7 +197,7 @@ async function openChat(friendUID) {
 
     if (chatPartnerAvatar) {
         const photoURL = friendData.photoURL || '';
-        const initials = (friendData.name?.charAt(0)?.toUpperCase()) || '👤';
+        const initials = (friendData.name?.charAt(0)?.toUpperCase()) || '?';
         if (photoURL) {
             chatPartnerAvatar.innerHTML = `<img class="avatar-img" src="${escapeAttribute(photoURL)}" alt="${escapeAttribute(initials)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"><span class="avatar-fallback" style="display:none;">${escapeHTML(initials)}</span>`;
         } else {
@@ -414,7 +414,10 @@ function setupSidebarMenu() {
         runAndClose(() => window.profileManager?.open());
     });
     document.getElementById('sdropTheme')?.addEventListener('click', () => {
-        runAndClose(toggleDarkMode);
+        // Close dropdown first, then open theme panel
+        document.getElementById('sidebarDropdown')?.classList.remove('open');
+        if (window.ThemeManager) ThemeManager.openPanel();
+        else toggleDarkMode();
     });
     document.getElementById('sdropPrivate')?.addEventListener('click', () => {
         runAndClose(() => window.privateChatsManager?.openMenu());
