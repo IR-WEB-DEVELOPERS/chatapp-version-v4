@@ -231,6 +231,9 @@ async function openChat(friendUID) {
         };
     }
 
+    // Show vanish mode banner if active
+    updateVanishBanner(friendUID);
+
     const msgInput = document.getElementById('msg');
     if (msgInput) msgInput.oninput = onTypingInput;
 }
@@ -479,6 +482,38 @@ window.addEventListener('load', () => {
         if (window.driveShare) window.driveShare.init();
     }, 1500);
 });
+
+// ── Vanish Mode Banner ────────────────────────────────────────
+function updateVanishBanner(friendUID) {
+    // Remove any existing banner
+    const existing = document.getElementById('vanishModeBanner');
+    if (existing) existing.remove();
+
+    if (!friendUID || !currentUser) return;
+    const chatId   = generateChatId(currentUser.uid, friendUID);
+    const vanishOn = localStorage.getItem(`vanishMode_${chatId}`) === 'true';
+    if (!vanishOn) return;
+
+    const individualChat = document.getElementById('individualChat');
+    if (!individualChat) return;
+
+    const banner = document.createElement('div');
+    banner.id        = 'vanishModeBanner';
+    banner.className = 'vanish-mode-banner';
+    banner.innerHTML = `
+        <span class="vanish-banner-icon">👻</span>
+        <span class="vanish-banner-text">Vanish Mode is <strong>ON</strong> — messages will disappear when turned off</span>
+    `;
+
+    // Insert banner right after chat-header
+    const chatHeader = individualChat.querySelector('.chat-header');
+    if (chatHeader && chatHeader.nextSibling) {
+        individualChat.insertBefore(banner, chatHeader.nextSibling);
+    } else {
+        individualChat.prepend(banner);
+    }
+}
+window.updateVanishBanner = updateVanishBanner;
 
 window.initializeApp      = initializeApp;
 window.switchTab          = switchTab;
