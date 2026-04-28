@@ -68,6 +68,9 @@
                             <button class="sdrop-item" id="sdropShareProfile">
                                 <span class="sdrop-icon" data-icon="share"></span> Share Profile Link
                             </button>
+                            <button class="sdrop-item" id="sdropScanQR">
+                                <span class="sdrop-icon" data-icon="camera"></span> Scan QR Code
+                            </button>
                             <button class="sdrop-item sdrop-danger" id="sdropLogout">
                                 <span class="sdrop-icon" data-icon="close"></span> Log Out
                             </button>
@@ -536,6 +539,7 @@
     <!-- Profile + Stories System -->
     <script src="profile.js"></script>
     <script src="friendProfile.js"></script>
+    <script src="qr.js"></script>
 
     <!-- Private Chats System -->
     <script src="privateChats.js"></script>
@@ -703,6 +707,11 @@
             if (window.chatInteractions && window.currentUser) {
                 window.chatInteractions.shareProfileLink(window.currentUser.uid);
             }
+        });
+
+        document.getElementById('sdropScanQR')?.addEventListener('click', () => {
+            document.getElementById('sidebarDropdown')?.classList.remove('open');
+            window.QRManager?.openScannerModal();
         });
 
         // Share Group Link button in group chat header
