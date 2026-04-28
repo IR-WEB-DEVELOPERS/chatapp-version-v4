@@ -293,45 +293,33 @@ user is speaking (Telugu, Hindi, English, etc.).`;
         friendsList.insertBefore(btn, friendsList.firstChild);
     }
 
-    // ── Watch for friendsList DOM changes and keep AI pinned ──
-    function watchFriendsList() {
-        const friendsList = document.getElementById('friendsList');
-        if (!friendsList) {
-            setTimeout(watchFriendsList, 500);
+    // ── Hook into _renderFriendsList so AI is always re-injected ──
+    function hookRenderFriendsList() {
+        const original = window._renderFriendsList;
+        if (!original) return false;
+        window._renderFriendsList = function () {
+            original.apply(this, arguments);
+            injectAIIntoFriendsList();
+        };
+        return true;
+    }
+
+    // ── Init: poll until friends module is ready, then hook ──
+    function init() {
+        if (hookRenderFriendsList()) {
+            injectAIIntoFriendsList();
             return;
         }
-        // Run once now
-        injectAIIntoFriendsList();
-
-        // Re-inject whenever the list re-renders (the app rebuilds innerHTML)
-        const observer = new MutationObserver(() => {
-            injectAIIntoFriendsList();
-        });
-        observer.observe(friendsList, { childList: true, subtree: false });
+        const poll = setInterval(() => {
+            if (hookRenderFriendsList()) {
+                clearInterval(poll);
+                injectAIIntoFriendsList();
+            }
+        }, 300);
     }
 
-    // ── Init: wait for app to be ready ───────────────────────
-    function init() {
-        // If currentUser is set, app is ready
-        if (window.currentUser || window.auth?.currentUser) {
-            watchFriendsList();
-        } else {
-            // Poll until auth is ready
-            const poll = setInterval(() => {
-                if (window.currentUser || document.getElementById('friendsList')) {
-                    clearInterval(poll);
-                    watchFriendsList();
-                }
-            }, 800);
-        }
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        // Slight delay to let app modules init first
-        setTimeout(init, 1500);
-    }
+    // Always wait a tick so all modules load first
+    setTimeout(init, 500);
 
     // Expose for debug
     window.aiAssistant = { openAIChat, clearHistory: () => { localStorage.removeItem(STORAGE_KEY); renderHistory(); } };
