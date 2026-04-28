@@ -384,11 +384,15 @@ class SignalingManager {
 
         try {
             console.log('❌ Declining call:', callId);
-            
-            await this.callCollection.doc(callId).update({
+
+            // FIX: Use set+merge instead of update — if the caller's offer document
+            // hasn't been written yet (race condition where decline fires before offer
+            // lands in Firestore), update() throws "No document to update". set+merge
+            // creates the doc if missing, or merges into the existing one safely.
+            await this.callCollection.doc(callId).set({
                 status: 'declined',
                 declinedAt: new Date()
-            });
+            }, { merge: true });
             
             console.log('✅ Call declined successfully');
             
