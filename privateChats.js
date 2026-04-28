@@ -82,7 +82,7 @@ window.privateChatsManager = (() => {
             _unlocked = true;
             _closePasscodeModal();
             _showPrivateChatsSection();
-            if (window.showToast) showToast('🔓 Private chats unlocked!', 'success');
+            if (window.showToast) showToast('Private chats unlocked!', 'success');
         } else {
             _passcodeBuffer = '';
             _updateDots('passcodeDots', 0);
@@ -183,7 +183,7 @@ window.privateChatsManager = (() => {
                     if (buf === _changeNewCode) {
                         _setStoredCode(buf);
                         document.getElementById('changePasscodeModal').style.display = 'none';
-                        if (window.showToast) showToast('✅ Passcode changed!', 'success');
+                        if (window.showToast) showToast('Passcode changed!', 'success');
                     } else {
                         _changeBuffer  = '';
                         _changeStep    = 'new';
@@ -318,7 +318,7 @@ window.privateChatsManager = (() => {
                     <span class="friend-name">${window.escapeHTML ? escapeHTML(userData.name || uid) : (userData.name || uid)}</span>
                     <span class="friend-status">${window.escapeHTML ? escapeHTML(userData.status || 'offline') : (userData.status || 'offline')}</span>
                 </div>
-                <button class="remove-private-btn" data-uid="${uid}" title="Remove from private">✕</button>
+                <button class="remove-private-btn" data-uid="${uid}" title="Remove from private" data-icon-btn="close"></button>
             `;
             item.querySelector('.remove-private-btn')?.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -396,7 +396,7 @@ window.privateChatsManager = (() => {
             listEl.innerHTML = blocked.map(u => `
                 <div class="blocked-item" style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">
                     <div style="display:flex;align-items:center;gap:10px;">
-                        <span style="font-size:28px;">🚫</span>
+                        <span class="block-icon-svg" style="display:flex;align-items:center;"></span>
                         <span style="font-weight:500;">${window.escapeHTML ? escapeHTML(u.name) : u.name}</span>
                     </div>
                     <button class="btn-secondary" style="font-size:12px;padding:4px 10px;" onclick="window.privateChatsManager.unblockContact('${u.uid}')">Unblock</button>
@@ -410,13 +410,13 @@ window.privateChatsManager = (() => {
     function tryUnlockFromSearch(code) {
         const stored = _getStoredCode();
         if (!stored) {
-            if (window.showToast) showToast('Private chats not set up yet. Use the ⋮ menu to set up.', 'info');
+            if (window.showToast) showToast('Private chats not set up yet. Use the menu to set up.', 'info');
             return;
         }
         if (code === stored) {
             _unlocked = true;
             _showPrivateChatsSection();
-            if (window.showToast) showToast('🔓 Private chats unlocked!', 'success');
+            if (window.showToast) showToast('Private chats unlocked!', 'success');
         } else {
             if (window.showToast) showToast('Wrong passcode!', 'error');
         }
@@ -436,7 +436,7 @@ window.privateChatsManager = (() => {
 
     function _showPrivateChatsMenu() {
         const opts = [
-            { label: '🔑 Change Passcode',    action: () => _openChangePasscodeModal() },
+            { label: 'Change Passcode',    action: () => _openChangePasscodeModal() },
             { label: 'Lock Private Chats', action: () => { _hidePrivateChatsSection(); if (window.showToast) showToast('Private chats locked', 'info'); } },
         ];
         const modal = document.createElement('div');
@@ -444,7 +444,7 @@ window.privateChatsManager = (() => {
         modal.style.display = 'flex';
         modal.innerHTML = `
             <div class="modal" style="max-width:300px;">
-                <div class="modal-header"><h3>Private Chats</h3><button class="modal-close" id="pcMenuClose">✕</button></div>
+                <div class="modal-header"><h3>Private Chats</h3><button class="modal-close" id="pcMenuClose" data-icon-btn="close"></button></div>
                 <div class="modal-body" style="padding:8px 0;">
                     ${opts.map((o, i) => `<button class="dropdown-item" style="width:100%;text-align:left;padding:12px 20px;" data-pc-opt="${i}">${o.label}</button>`).join('')}
                 </div>
