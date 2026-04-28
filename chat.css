@@ -3537,3 +3537,152 @@ body {
     gap: 8px;
     -webkit-overflow-scrolling: touch;
 }
+
+
+/* ============================================================
+   ONE TIME VIEW (OTV) STYLES
+   ============================================================ */
+
+/* Toggle button in input toolbar */
+.otv-toggle-btn {
+    background: none;
+    border: 1.5px solid transparent;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.55;
+    transition: opacity 0.2s, border-color 0.2s, background 0.2s;
+    flex-shrink: 0;
+}
+.otv-toggle-btn:hover { opacity: 1; }
+.otv-toggle-btn.otv-active {
+    opacity: 1;
+    border-color: #7c3aed;
+    background: rgba(124,58,237,0.12);
+    animation: otvPulse 1.6s ease-in-out infinite;
+}
+@keyframes otvPulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(124,58,237,0.35); }
+    50%      { box-shadow: 0 0 0 6px rgba(124,58,237,0); }
+}
+
+/* Receiver locked bubble */
+.otv-locked .otv-bubble {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: linear-gradient(135deg, #7c3aed22, #a855f722);
+    border: 1.5px dashed #7c3aed88;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: background 0.2s;
+    max-width: 260px;
+}
+.otv-locked .otv-bubble:hover {
+    background: linear-gradient(135deg, #7c3aed33, #a855f733);
+}
+.otv-eye-icon { font-size: 20px; }
+.otv-label {
+    font-size: 13px;
+    color: var(--text-secondary, #888);
+}
+.otv-label em { font-style: italic; font-size: 11px; }
+
+/* Sender's sent OTV bubble */
+.otv-sent .otv-sent-bubble {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: linear-gradient(135deg, #7c3aed33, #a855f733);
+    border: 1.5px solid #7c3aed66;
+    border-radius: 16px;
+    max-width: 280px;
+}
+.otv-sent-text {
+    font-size: 14px;
+    color: var(--text-primary, #eee);
+}
+.otv-status-label {
+    font-size: 11px;
+    opacity: 0.65;
+    margin-top: 2px;
+}
+
+/* Expired OTV placeholder */
+.otv-expired .message-text { color: var(--text-secondary, #aaa) !important; }
+.otv-icon { margin-right: 4px; }
+
+/* Fullscreen overlay */
+.otv-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.72);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(6px);
+}
+.otv-modal {
+    background: var(--surface, #1e1e2e);
+    border-radius: 20px;
+    padding: 28px 32px;
+    max-width: 380px;
+    width: 90%;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+    text-align: center;
+    animation: otvModalIn 0.25s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes otvModalIn {
+    from { transform: scale(0.8); opacity: 0; }
+    to   { transform: scale(1);   opacity: 1; }
+}
+.otv-modal-header {
+    font-size: 15px;
+    font-weight: 600;
+    color: #a78bfa;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+.otv-modal-body {
+    font-size: 17px;
+    color: var(--text-primary, #eee);
+    line-height: 1.6;
+    margin-bottom: 24px;
+    word-break: break-word;
+    background: rgba(124,58,237,0.08);
+    border-radius: 12px;
+    padding: 14px 18px;
+}
+.otv-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.otv-countdown {
+    font-size: 12px;
+    color: #a78bfa;
+    font-style: italic;
+}
+.otv-close-btn {
+    background: #7c3aed;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 18px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.otv-close-btn:hover { background: #6d28d9; }
