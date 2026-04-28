@@ -66,7 +66,10 @@ function updateUserInfo() {
     const avatarFallback = document.getElementById('avatarFallback');
 
     if (userNameEl)   userNameEl.textContent   = currentUserData.name;
-    if (userStatusEl) userStatusEl.textContent = 'Online';
+    if (userStatusEl) {
+        const I = window.Icons;
+        userStatusEl.innerHTML = (I ? '<span style="display:inline-flex;vertical-align:middle;color:#22c55e;margin-right:3px;">' + I.get('onlineDot', 8) + '</span>' : '') + 'Online';
+    }
 
     const photoURL = currentUserData.photoURL || currentUser.photoURL;
     if (photoURL && userAvatarEl && avatarFallback) {
