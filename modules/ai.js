@@ -122,9 +122,14 @@ user is speaking (Telugu, Hindi, English, etc.).`;
         let pane = document.getElementById('aiChatPane');
         if (!pane) {
             pane = buildAIPaneDOM();
-            // Insert next to individualChat
-            const ref = individualChat || groupChatContainer;
-            ref?.parentNode?.insertBefore(pane, ref.nextSibling) || document.querySelector('.main-content')?.appendChild(pane);
+            // Insert inside chat-area (same parent as other chat containers)
+            const chatArea = document.querySelector('.chat-area');
+            if (chatArea) {
+                chatArea.appendChild(pane);
+            } else {
+                const ref = individualChat || groupChatContainer;
+                ref?.parentNode?.appendChild(pane);
+            }
         }
         pane.style.display = 'flex';
 
@@ -138,7 +143,8 @@ user is speaking (Telugu, Hindi, English, etc.).`;
         const pane = document.createElement('div');
         pane.id = 'aiChatPane';
         pane.className = 'chat-container';
-        pane.style.cssText = 'display:flex;flex-direction:column;flex:1;min-width:0;';
+        // Let chat-container CSS handle layout; only override display
+        pane.style.cssText = 'display:flex;overflow:hidden;';
 
         pane.innerHTML = `
         <div class="chat-header">
@@ -154,11 +160,10 @@ user is speaking (Telugu, Hindi, English, etc.).`;
                 🗑️ Clear
             </button>
         </div>
-        <div id="aiMessages" class="chat-messages" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;"></div>
+        <div id="aiMessages" class="chat-messages"></div>
         <div class="message-input">
             <div class="message-input-container">
-                <textarea id="aiMsgInput" placeholder="Type a message..." rows="1"
-                    style="flex:1;resize:none;background:transparent;border:none;outline:none;padding:8px;font-size:1rem;color:inherit;font-family:inherit;"></textarea>
+                <textarea id="aiMsgInput" placeholder="Type a message..." rows="1"></textarea>
                 <button id="aiSendBtn" class="send-btn" title="Send">
                     ${window.Icons ? window.Icons.get('send', 20) : '➤'}
                 </button>
