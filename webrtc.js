@@ -201,8 +201,10 @@ class WebRTCManager {
                 this.peerConnection.addTrack(track, this.localStream);
             });
 
-            // Setup data channel handler
+            // Setup data channel handler — callee receives the channel the caller created.
+            // Guard: if the connection is already closing/closed when the event fires, skip.
             this.peerConnection.ondatachannel = (event) => {
+                if (!this.peerConnection || this.peerConnection.connectionState === 'closed') return;
                 this.dataChannel = event.channel;
                 this.setupDataChannel();
             };
@@ -400,24 +402,29 @@ class WebRTCManager {
     }
 
     setupDataChannel() {
-        if (this.dataChannel) {
-            this.dataChannel.onopen = () => {
-                console.log('Data channel opened');
-                this.sendCallMetadata();
-            };
-            
-            this.dataChannel.onmessage = (event) => {
-                this.handleDataChannelMessage(event.data);
-            };
-            
-            this.dataChannel.onclose = () => {
-                console.log('Data channel closed');
-            };
-            
-            this.dataChannel.onerror = (error) => {
-                console.error('Data channel error:', error);
-            };
-        }
+        if (!this.dataChannel) return;
+
+        this.dataChannel.onopen = () => {
+            console.log('Data channel opened');
+            this.sendCallMetadata();
+        };
+        
+        this.dataChannel.onmessage = (event) => {
+            this.handleDataChannelMessage(event.data);
+        };
+        
+        this.dataChannel.onclose = () => {
+            console.log('Data channel closed');
+        };
+
+        // FIX: Data channel errors are non-fatal — the call audio/video works
+        // independently of the data channel. Log as warning, never throw.
+        // RTCErrorEvent fires when the SCTP transport is torn down (e.g. the
+        // peer closed the connection before the channel was fully negotiated).
+        this.dataChannel.onerror = (event) => {
+            const err = event?.error || event;
+            console.warn('⚠️ Data channel error (non-fatal):', err?.message || err);
+        };
     }
 
     async handleOffer(callId, offer, callerUID, isVideoCall) {
