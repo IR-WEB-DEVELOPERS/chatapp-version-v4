@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduChat Login</title>
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#6366f1">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="EduChat">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+    <link rel="stylesheet" href="login.css">
+</head>
+<body>
+    <main class="login-container">
+        <section class="login-card">
+            <div class="app-logo">
+                <h1>EduChat</h1>
+                <p>Connect with your classmates and friends</p>
+            </div>
+
+            <div class="login-form">
+                <h2>Welcome back</h2>
+                <p class="subtitle">Sign in to continue chatting</p>
+
+                <button id="googleLogin" class="login-btn google-btn" type="button">
+                    <span>G</span>
+                    Continue with Google
+                </button>
+
+                <div class="divider">
+                    <span>Secure login</span>
+                </div>
+
+                <div class="email-option">
+                    Google sign-in is currently enabled for EduChat.
+                </div>
+            </div>
+
+            <div class="login-footer">
+                <p>Your chat data is stored securely with Firebase.</p>
+            </div>
+        </section>
+    </main>
+
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="login.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(reg => console.log('✅ SW registered:', reg.scope))
+                    .catch(err => console.warn('SW failed:', err));
+            });
+        }
+    </script>
+</body>
+</html>

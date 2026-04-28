@@ -1,0 +1,163 @@
+// ============================================================
+//  presence.js — Realtime presence, user data loading
+// ============================================================
+
+async function loadUserData() {
+    console.log('Loading user data for:', currentUser.uid);
+
+    const cacheKey = `user_${currentUser.uid}`;
+    const cached   = enhancedCache.get(cacheKey);
+
+    if (cached) {
+        currentUserData        = cached;
+        window.currentUserData = currentUserData;
+        updateUserInfo();
+        // FIX: unreadMap ని cache నుండి కూడా populate చేయాలి
+        if (currentUserData.unreadCounts) {
+            Object.keys(currentUserData.unreadCounts).forEach(chatId => {
+                unreadMap[chatId] = currentUserData.unreadCounts[chatId];
+            });
+        }
+        return;
+    }
+
+    try {
+        const userRef = db.collection('users').doc(currentUser.uid);
+        let snap      = await userRef.get();
+
+        if (!snap.exists) {
+            console.log('Creating new user document...');
+            const username = generateUsername(currentUser.displayName || 'user');
+            await userRef.set({
+                name:              currentUser.displayName || 'User',
+                email:             currentUser.email || null,
+                username,
+                usernameChangedAt: null,
+                status:            'online',
+                friends:           [],
+                photoURL:          currentUser.photoURL || null,
+                unreadCounts:      {}
+            });
+            snap = await userRef.get();
+        }
+
+        currentUserData        = snap.data();
+        window.currentUserData = currentUserData;
+        enhancedCache.set(cacheKey, currentUserData, 30 * 60 * 1000);
+        console.log('User data loaded:', currentUserData);
+        updateUserInfo();
+
+        if (currentUserData.unreadCounts) {
+            Object.keys(currentUserData.unreadCounts).forEach(chatId => {
+                unreadMap[chatId] = currentUserData.unreadCounts[chatId];
+            });
+        }
+
+    } catch (error) {
+        console.error('Error in loadUserData:', error);
+        throw error;
+    }
+}
+
+function updateUserInfo() {
+    const userNameEl     = document.getElementById('userName');
+    const userStatusEl   = document.getElementById('userStatus');
+    const userAvatarEl   = document.getElementById('userAvatar');
+    const avatarFallback = document.getElementById('avatarFallback');
+
+    if (userNameEl)   userNameEl.textContent   = currentUserData.name;
+    if (userStatusEl) userStatusEl.textContent = 'Online';
+
+    const photoURL = currentUserData.photoURL || currentUser.photoURL;
+    if (photoURL && userAvatarEl && avatarFallback) {
+        userAvatarEl.src          = photoURL;
+        userAvatarEl.style.display = 'block';
+        avatarFallback.style.display = 'none';
+    }
+}
+
+// ── Presence setup ───────────────────────────────────────────
+function setupPresence() {
+    if (!currentUser) return;
+    const userRef = db.collection('users').doc(currentUser.uid);
+    userRef.update({ status: 'online', lastSeen: new Date() }).catch(console.error);
+
+    window.addEventListener('beforeunload', () => {
+        userRef.update({ status: 'offline', lastSeen: new Date() }).catch(() => {});
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        const status = document.visibilityState === 'hidden' ? 'away' : 'online';
+        userRef.update({ status, lastSeen: new Date() }).catch(console.error);
+    });
+
+    startFriendsPresenceListener();
+}
+
+function startFriendsPresenceListener() {
+    friendsPresenceUnsubscribers.forEach(unsub => unsub());
+    friendsPresenceUnsubscribers = [];
+
+    if (presencePollInterval) clearInterval(presencePollInterval);
+
+    const friends = currentUserData?.friends || [];
+    if (friends.length === 0) return;
+
+    // Realtime listener: only current chat partner
+    if (chatWithUID) {
+        const unsub = db.collection('users').doc(chatWithUID)
+            .onSnapshot(doc => {
+                if (!doc.exists) return;
+                const data     = doc.data();
+                const cacheKey = 'user_' + chatWithUID;
+                const cached   = enhancedCache.get(cacheKey);
+                if (cached) {
+                    cached.status   = data.status;
+                    cached.lastSeen = data.lastSeen;
+                    enhancedCache.set(cacheKey, cached, 30 * 60 * 1000);
+                }
+                const statusEl = document.getElementById('chatPartnerStatus');
+                if (statusEl) {
+                    statusEl.textContent = formatStatus(data.status, data.lastSeen);
+                    statusEl.className   = data.status === 'online' ? 'status-online' : 'status-offline';
+                }
+            }, console.error);
+        friendsPresenceUnsubscribers.push(unsub);
+    }
+
+    // Poll all friends every 5 minutes
+    async function pollFriendsPresence() {
+        const chunks = [];
+        for (let i = 0; i < friends.length; i += 10) chunks.push(friends.slice(i, i + 10));
+
+        for (const chunk of chunks) {
+            try {
+                const snap = await db.collection('users')
+                    .where(firebase.firestore.FieldPath.documentId(), 'in', chunk)
+                    .get();
+                snap.forEach(doc => {
+                    const data     = doc.data();
+                    const cacheKey = 'user_' + doc.id;
+                    const cached   = enhancedCache.get(cacheKey);
+                    if (cached) {
+                        cached.status   = data.status;
+                        cached.lastSeen = data.lastSeen;
+                        enhancedCache.set(cacheKey, cached, 30 * 60 * 1000);
+                    }
+                });
+                // Pure re-render from updated cache — ZERO additional reads
+                if (window._renderFriendsList) window._renderFriendsList();
+            } catch (e) { console.error('Presence poll error:', e); }
+        }
+    }
+
+    pollFriendsPresence();
+    presencePollInterval = setInterval(pollFriendsPresence, PRESENCE_POLL_MS);
+}
+
+window.loadUserData               = loadUserData;
+window.setupPresence              = setupPresence;
+window.startFriendsPresenceListener = startFriendsPresenceListener;
+window.updateUserInfo             = updateUserInfo;
+
+console.log('presence.js loaded');
