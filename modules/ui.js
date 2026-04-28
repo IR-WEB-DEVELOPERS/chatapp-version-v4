@@ -86,19 +86,30 @@ const modalManager = {
 
 // ── Toast System ─────────────────────────────────────────────
 const toastManager = {
-    show({ icon = '💬', title, body, type = 'message', duration = 4500, onClick = null }) {
+    show({ icon = null, title, body, type = 'message', duration = 4500, onClick = null }) {
         const container = document.getElementById('toastContainer');
         if (!container) return;
+
+        const I = window.Icons;
+        // Build icon HTML: prefer SVG, fall back to passed string
+        const iconMap = {
+            message: I ? I.get('chat', 16) : '💬',
+            success: I ? I.get('success', 16) : '✓',
+            error:   I ? I.get('errorCircle', 16) : '✕',
+            info:    I ? I.get('info', 16) : 'i',
+            warning: I ? I.get('warning', 16) : '!',
+        };
+        const iconHtml = (icon && !I) ? icon : (iconMap[type] || iconMap.message);
 
         const toast = document.createElement('div');
         toast.className = `toast toast-${type}`;
         toast.innerHTML = `
-            <div class="toast-icon">${icon}</div>
+            <div class="toast-icon">${iconHtml}</div>
             <div class="toast-content">
                 <div class="toast-title">${escapeHTML(title)}</div>
                 <div class="toast-body">${escapeHTML(body)}</div>
             </div>
-            <button class="toast-close" title="Dismiss">${window.Icons ? window.Icons.get('close', 14) : '✕'}</button>
+            <button class="toast-close" title="Dismiss">${I ? I.get('close', 14) : '✕'}</button>
         `;
         container.appendChild(toast);
 
@@ -120,8 +131,8 @@ const toastManager = {
 // Expose simple showToast helper for all modules
 window.toastManager = toastManager;
 window.showToast    = function showToast(msg, type = 'info') {
-    const icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
-    toastManager.show({ icon: icons[type] || 'ℹ️', title: msg, body: '', type: 'message', duration: 3500 });
+    const icons = { success: 'success', error: 'error', info: 'info', warning: 'warning' };
+    toastManager.show({ icon: null, title: msg, body: '', type: icons[type] ? type : 'message', duration: 3500 });
 };
 // Legacy alias used by driveFileShare.js
 window._showToast = window.showToast;
@@ -208,26 +219,29 @@ const badgeManager = {
     }
 };
 
-// ── Dark Mode ────────────────────────────────────────────────
+// ── Dark Mode — delegates to ThemeManager if available ───────
 function initializeDarkMode() {
+    if (window.ThemeManager) { ThemeManager.init(); return; }
     if (localStorage.getItem('darkMode') === 'true') {
         document.body.classList.add('dark');
     }
 }
 
 function toggleDarkMode() {
+    if (window.ThemeManager) { ThemeManager.toggleDark(); return; }
     document.body.classList.toggle('dark');
     localStorage.setItem('darkMode', document.body.classList.contains('dark'));
     _syncThemeDropdownLabel();
 }
 
 function _syncThemeDropdownLabel() {
+    if (window.ThemeManager) return; // ThemeManager handles its own label
     const isDark = document.body.classList.contains('dark');
     const icon   = document.getElementById('themeIcon');
     const label  = document.getElementById('themeLabel');
     if (icon) {
         const I = window.Icons;
-        icon.innerHTML = isDark ? (I ? I.get('sun', 18) : '☀️') : (I ? I.get('moon', 18) : '🌙');
+        icon.innerHTML = isDark ? (I ? I.get('sun', 18) : '☀') : (I ? I.get('moon', 18) : '☾');
     }
     if (label) label.textContent = isDark ? 'Light Mode' : 'Dark Mode';
 }
