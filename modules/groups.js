@@ -126,6 +126,8 @@ async function openGroupChat(groupId) {
     if (defaultChat)        defaultChat.style.display        = 'none';
     if (individualChat)     individualChat.style.display     = 'none';
     if (groupChatContainer) groupChatContainer.style.display = 'flex';
+    const aiChatPane = document.getElementById('aiChatPane');
+    if (aiChatPane)         aiChatPane.style.display         = 'none';
 
     if (window._hideSidebarOnMobile) window._hideSidebarOnMobile();
 
