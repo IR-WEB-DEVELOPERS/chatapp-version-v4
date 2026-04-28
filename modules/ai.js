@@ -150,6 +150,9 @@ user is speaking (Telugu, Hindi, English, etc.).`;
                     <span class="status-online" style="font-size:.75rem;">Always here for you ✨</span>
                 </div>
             </div>
+            <button id="aiClearBtn" title="Clear Chat" style="margin-left:auto;background:none;border:none;cursor:pointer;padding:6px 10px;border-radius:8px;font-size:.8rem;color:var(--text-secondary,#888);display:flex;align-items:center;gap:4px;opacity:.8;transition:opacity .2s;">
+                🗑️ Clear
+            </button>
         </div>
         <div id="aiMessages" class="chat-messages" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;"></div>
         <div class="message-input">
@@ -161,6 +164,14 @@ user is speaking (Telugu, Hindi, English, etc.).`;
                 </button>
             </div>
         </div>`;
+
+        // Clear chat button
+        pane.querySelector('#aiClearBtn').addEventListener('click', () => {
+            if (confirm('Chat history clear చేయాలా?')) {
+                localStorage.removeItem(STORAGE_KEY);
+                renderHistory();
+            }
+        });
 
         // Back button
         pane.querySelector('#aiBackBtn').addEventListener('click', () => {
