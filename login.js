@@ -174,12 +174,19 @@ async function verifyLoginOtp() {
     window.location.href = 'chat.html';
 }
 
+// Tracks whether OTP flow was triggered by a manual button click.
+// onAuthStateChanged fires on every page load for existing sessions —
+// we must NOT send OTP automatically; only redirect if already verified.
+let _otpTriggeredByClick = false;
+
 document.getElementById('googleLogin').onclick = async () => {
     try {
         const provider = new firebase.auth.GoogleAuthProvider();
+        _otpTriggeredByClick = true;
         const result = await auth.signInWithPopup(provider);
         await sendLoginOtp(result.user);
     } catch (error) {
+        _otpTriggeredByClick = false;
         console.error('Login error:', error);
         alert('Login failed. Please try again.');
     }
@@ -187,9 +194,18 @@ document.getElementById('googleLogin').onclick = async () => {
 
 auth.onAuthStateChanged(user => {
     if (!user) return;
+
+    // Always redirect if OTP already verified this session
     if (isLoginVerified(user.uid)) {
         window.location.href = 'chat.html';
         return;
     }
-    sendLoginOtp(user);
+
+    // Only send OTP if user explicitly clicked the Google button.
+    // Existing Firebase sessions trigger this callback on page load —
+    // we do NOT want to auto-show the OTP modal in that case.
+    if (_otpTriggeredByClick) {
+        _otpTriggeredByClick = false;
+        sendLoginOtp(user);
+    }
 });
