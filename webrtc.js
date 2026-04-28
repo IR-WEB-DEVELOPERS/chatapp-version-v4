@@ -689,23 +689,16 @@ class WebRTCManager {
                 </div>
                 
                 <div class="call-controls">
-                    <button class="call-btn mute-audio" title="Mute Audio"><span data-icon="micFill"></span></button>
-                    ${isVideoCall ? `<button class="call-btn mute-video" title="Mute Video"><span data-icon="videoFill"></span></button>` : ''}
-                    ${isVideoCall && !this.isMobileDevice() ? `<button class="call-btn screen-share" title="Share Screen"><span data-icon="monitor"></span></button>` : ''}
-                    ${isVideoCall ? `<button class="call-btn switch-camera" title="Switch Camera"><span data-icon="switchCam"></span></button>` : ''}
-                    <button class="call-btn end-call" title="End Call"><span data-icon="phoneEnd"></span></button>
+                    <button class="call-btn mute-audio" title="Mute Audio">${window.Icons.get('micFill', 24)}</button>
+                    ${isVideoCall ? `<button class="call-btn mute-video" title="Mute Video">${window.Icons.get('videoFill', 24)}</button>` : ''}
+                    ${isVideoCall && !this.isMobileDevice() ? `<button class="call-btn screen-share" title="Share Screen">${window.Icons.get('monitor', 24)}</button>` : ''}
+                    ${isVideoCall ? `<button class="call-btn switch-camera" title="Switch Camera">${window.Icons.get('switchCam', 24)}</button>` : ''}
+                    <button class="call-btn end-call" title="End Call">${window.Icons.get('phoneEnd', 24)}</button>
                 </div>
             </div>
         `;
         
         document.body.insertAdjacentHTML('beforeend', callHTML);
-        // Hydrate data-icon spans with SVGs
-        if (window.Icons) {
-            document.querySelectorAll('#activeCall [data-icon]').forEach(el => {
-                const h = window.Icons.get(el.getAttribute('data-icon'), 22);
-                if (h) { el.innerHTML = h; el.removeAttribute('data-icon'); }
-            });
-        }
         this.setupCallUIEventListeners();
         this.updateLocalVideo();
         // NOTE: Timer is NOT started here — it starts in handleCallConnected() when peer connects
@@ -772,22 +765,14 @@ class WebRTCManager {
                         <p>Incoming ${isVideoCall ? 'Video' : 'Voice'} Call</p>
                     </div>
                     <div class="incoming-call-controls">
-                        <button class="call-btn accept-call"><span data-icon="phoneAccept"></span></button>
-                        <button class="call-btn decline-call"><span data-icon="phoneEnd"></span></button>
+                        <button class="call-btn accept-call">${window.Icons.get('phoneAccept', 24)}</button>
+                        <button class="call-btn decline-call">${window.Icons.get('phoneEnd', 24)}</button>
                     </div>
                 </div>
             </div>
         `;
         
         document.body.insertAdjacentHTML('beforeend', incomingCallHTML);
-
-        // Hydrate data-icon spans
-        if (window.Icons) {
-            document.querySelectorAll('#incomingCall [data-icon]').forEach(el => {
-                const h = window.Icons.get(el.getAttribute('data-icon'), 22);
-                if (h) { el.innerHTML = h; el.removeAttribute('data-icon'); }
-            });
-        }
 
         const acceptBtn = document.querySelector('.accept-call');
         const declineBtn = document.querySelector('.decline-call');
