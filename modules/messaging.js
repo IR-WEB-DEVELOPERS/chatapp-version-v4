@@ -125,7 +125,7 @@ function buildMessageHTML(msg, isSent, isGroup) {
             // Already opened by receiver — show "vanished" placeholder
             return { html: `
                 <div class="message received deleted-msg otv-expired">
-                    <div class="message-text deleted-text"><span class="otv-icon">👁</span> One-time message expired</div>
+                    <div class="message-text deleted-text"><span class="otv-icon" style="display:inline-flex;vertical-align:middle">${I ? I.get('eyeExpired', 14) : ''}</span> One-time message expired</div>
                     <div class="message-time">${timeString}</div>
                 </div>
             `, dateLabel };
@@ -134,7 +134,7 @@ function buildMessageHTML(msg, isSent, isGroup) {
         return { html: `
             <div class="message received otv-locked" data-id="${escapeAttribute(msg.id || '')}" data-chattype="${isGroup ? 'group' : 'direct'}">
                 <div class="otv-bubble" onclick="openOneTimeViewMessage('${escapeAttribute(msg.id || '')}', '${isGroup ? 'group' : 'direct'}')">
-                    <span class="otv-eye-icon">👁</span>
+                    <span class="otv-eye-icon" style="display:inline-flex">${I ? I.get('eyeView', 20) : ''}</span>
                     <span class="otv-label">Tap to view · <em>disappears after opening</em></span>
                 </div>
                 <div class="message-time">${timeString}</div>
@@ -147,7 +147,7 @@ function buildMessageHTML(msg, isSent, isGroup) {
         return { html: `
             <div class="message sent otv-sent">
                 <div class="otv-sent-bubble">
-                    <span class="otv-eye-icon">👁</span>
+                    <span class="otv-eye-icon" style="display:inline-flex">${I ? I.get('eyeView', 16) : ''}</span>
                     <span class="otv-sent-text">${escapeHTML(msg.text)}</span>
                 </div>
                 <div class="message-time otv-status-label">${status} · ${timeString}</div>
@@ -1259,7 +1259,7 @@ function showScheduleModal(chatType) {
     overlay.id = 'scheduleOverlay';
     overlay.innerHTML = `
         <div class="delete-sheet schedule-sheet">
-            <p class="delete-sheet-title">📅 Schedule Message</p>
+            <p class="delete-sheet-title">Schedule Message</p>
             <div class="schedule-preview">${escapeHTML(text.substring(0, 80))}${text.length > 80 ? '…' : ''}</div>
             <label class="schedule-label">Send at</label>
             <input type="datetime-local" id="scheduleTime" class="schedule-input" min="${minStr}" value="${minStr}">
@@ -1434,7 +1434,7 @@ async function openOneTimeViewMessage(msgId, chatType) {
         overlay.className = 'otv-overlay';
         overlay.innerHTML = `
             <div class="otv-modal">
-                <div class="otv-modal-header"><span class="otv-eye-icon" style="font-size:28px">👁</span> One-Time View</div>
+                <div class="otv-modal-header"><span class="otv-eye-icon" style="display:inline-flex;vertical-align:middle">${I ? I.get('eyeView', 28) : ''}</span> One-Time View</div>
                 <div class="otv-modal-body">${modalBodyHtml}</div>
                 <div class="otv-modal-footer">
                     ${footerHtml}
