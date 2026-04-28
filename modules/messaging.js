@@ -23,11 +23,14 @@ function renderMessageActions(msg, isSent) {
     const fwdIcon    = I ? I.get('forward', 16) : '↪';
     const pinIcon    = isPinned ? (I ? I.get('pinFill',16) : '⊕') : (I ? I.get('pin',16) : '⊕');
     const trashIcon  = I ? I.get('trash',   16) : '[del]';
+    const editIcon   = I ? I.get('edit',    16) : '[edit]';
+    const isSentMsg  = msg.sender === (window.currentUser?.uid || '');
     return `
         <div class="msg-actions">
             <button class="msg-action-btn" data-action="reply"   data-id="${safeId}" title="Reply">${replyIcon}</button>
             <button class="msg-action-btn" data-action="forward" data-id="${safeId}" title="Forward">${fwdIcon}</button>
             <button class="msg-action-btn${isPinned ? ' pinned-active' : ''}" data-action="pin" data-id="${safeId}" title="${isPinned ? 'Unpin' : 'Pin'}">${pinIcon}</button>
+            ${isSentMsg ? `<button class="msg-action-btn msg-action-edit" data-action="edit" data-id="${safeId}" title="Edit">${editIcon}</button>` : ''}
             <button class="msg-action-btn msg-action-delete" data-action="delete" data-id="${safeId}" title="Delete">${trashIcon}</button>
         </div>
     `;
@@ -126,7 +129,15 @@ function buildMessageHTML(msg, isSent, isGroup) {
     } else if (msg.type === 'file' && window.driveShare) {
         bodyHtml = window.driveShare.renderFileMessage(msg, isSent);
     } else {
-        bodyHtml = `<div class="message-text">${escapeHTML(msg.text || '').replace(/\n/g, '<br>')}</div>`;
+        const rawText = msg.text || '';
+        const urlMatches = rawText.match(/(https?:\/\/[^\s<>"]+)/g) || [];
+        const linkedText = escapeHTML(rawText).replace(/\n/g, '<br>').replace(
+            /(https?:\/\/[^\s<>"&]+)/g,
+            '<a href="$1" target="_blank" rel="noopener" class="chat-link">$1</a>'
+        );
+        const dataLinks = urlMatches.length ? ` data-links='${JSON.stringify(urlMatches).replace(/'/g, "&#39;")}'` : '';
+        const editedBadge = msg.edited ? '<span class="edited-badge"> (edited)</span>' : '';
+        bodyHtml = `<div class="message-text"${dataLinks}>${linkedText}${editedBadge}</div>`;
     }
 
     const pinnedBadge = msg.pinned
@@ -196,6 +207,7 @@ function displayMessages(messages) {
     chatContainer.innerHTML = renderMessagesToHTML(messages, false);
     attachMessageActionListeners(chatContainer, messages, 'direct');
     window.chatInteractions?.attach(chatContainer, messages, 'direct');
+    attachLinkPreviews(chatContainer);
 
     // FIX: always scroll to bottom after rendering
     scrollToBottom('chat');
@@ -211,6 +223,7 @@ function displayGroupMessages(messages) {
     chatContainer.innerHTML = renderMessagesToHTML(messages, true);
     attachMessageActionListeners(chatContainer, messages, 'group');
     window.chatInteractions?.attach(chatContainer, messages, 'group');
+    attachLinkPreviews(chatContainer);
 
     // FIX: always scroll to bottom after rendering
     scrollToBottom('groupChat');
@@ -548,6 +561,12 @@ async function sendMessage() {
     const text = input.value.trim();
     if (!text || !chatWithUID) return;
 
+    // Handle edit mode
+    if (editingMsgId && editingChatType === 'direct') {
+        await saveEditedMessage(text, 'direct');
+        return;
+    }
+
     try {
         const chatId  = generateChatId(currentUser.uid, chatWithUID);
         const msgData = {
@@ -594,6 +613,12 @@ async function sendGroupMessage() {
     if (!input) return;
     const text = input.value.trim();
     if (!text || !groupChatID) return;
+
+    // Handle edit mode
+    if (editingMsgId && editingChatType === 'group') {
+        await saveEditedMessage(text, 'group');
+        return;
+    }
 
     try {
         const msgData = {
@@ -713,7 +738,17 @@ async function showDeleteMenu(msgId, chatType) {
         overlay.remove();
     };
     overlay.querySelector('.delete-for-all').onclick = async () => {
+        // Find the message to check the 5-min window
         try {
+            const msgDoc = await db.collection(collection).doc(msgId).get();
+            const msgData = msgDoc.data();
+            const msgTime = msgData?.time?.toDate ? msgData.time.toDate() : new Date(msgData?.time);
+            const elapsed = Date.now() - msgTime.getTime();
+            if (msgData?.sender !== currentUser.uid || elapsed > 5 * 60 * 1000) {
+                overlay.remove();
+                toastManager.show({ icon: null, type: 'info', title: 'Cannot delete for everyone', body: 'Only available within 5 minutes of sending.', duration: 3500 });
+                return;
+            }
             await db.collection(collection).doc(msgId).update({ deletedForAll: true });
         } catch (e) { console.error(e); }
         overlay.remove();
@@ -784,10 +819,11 @@ function attachMessageActionListeners(container, messages, chatType) {
             const msg    = messages.find(m => m.id === msgId);
             if (!msg) return;
 
-            if (action === 'reply')   await setReply(msg, chatType);
+            if (action === 'reply')      await setReply(msg, chatType);
             else if (action === 'forward') showForwardModal(msg);
             else if (action === 'delete')  showDeleteMenu(msgId, chatType);
             else if (action === 'pin')     togglePinMessage(msgId, chatType, !msg.pinned);
+            else if (action === 'edit')    startEditMessage(msg, chatType);
         });
     });
 }
@@ -988,6 +1024,300 @@ function markChatAsRead(chatId) {
     }
 }
 
+// ============================================================
+//  FEATURE: Link Preview
+// ============================================================
+const URL_REGEX = /(https?:\/\/[^\s<>"]+)/g;
+
+async function fetchLinkPreview(url) {
+    try {
+        // Use allorigins proxy to avoid CORS
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+        const res = await fetch(proxyUrl);
+        const data = await res.json();
+        const html = data.contents || '';
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+
+        const getMeta = (prop) =>
+            doc.querySelector(`meta[property="${prop}"]`)?.content ||
+            doc.querySelector(`meta[name="${prop}"]`)?.content || '';
+
+        const title = getMeta('og:title') || doc.title || '';
+        const description = getMeta('og:description') || getMeta('description') || '';
+        const image = getMeta('og:image') || '';
+        const siteName = getMeta('og:site_name') || new URL(url).hostname;
+
+        if (!title && !description) return null;
+        return { url, title, description, image, siteName };
+    } catch (e) {
+        return null;
+    }
+}
+
+function renderLinkPreview(preview) {
+    if (!preview) return '';
+    return `
+        <a class="link-preview" href="${escapeAttribute(preview.url)}" target="_blank" rel="noopener">
+            ${preview.image ? `<img class="link-preview-img" src="${escapeAttribute(preview.image)}" alt="" onerror="this.style.display='none'">` : ''}
+            <div class="link-preview-body">
+                <span class="link-preview-site">${escapeHTML(preview.siteName)}</span>
+                <span class="link-preview-title">${escapeHTML(preview.title)}</span>
+                ${preview.description ? `<span class="link-preview-desc">${escapeHTML(preview.description.substring(0, 100))}</span>` : ''}
+            </div>
+        </a>
+    `;
+}
+
+// Cache previews in memory to avoid refetching
+const _previewCache = {};
+
+async function attachLinkPreviews(container) {
+    const msgEls = container.querySelectorAll('.message-text[data-links]');
+    for (const el of msgEls) {
+        const urls = JSON.parse(el.dataset.links || '[]');
+        if (!urls.length) continue;
+        const url = urls[0]; // show preview for first link only
+        if (!_previewCache[url]) {
+            _previewCache[url] = await fetchLinkPreview(url);
+        }
+        const preview = _previewCache[url];
+        if (preview) {
+            const previewEl = document.createElement('div');
+            previewEl.innerHTML = renderLinkPreview(preview);
+            el.parentElement.insertBefore(previewEl.firstChild, el.nextSibling);
+        }
+    }
+}
+
+// ============================================================
+//  FEATURE: Edit Message (5-min window)
+// ============================================================
+let editingMsgId = null;
+let editingChatType = null;
+
+function canEditOrDelete(msg) {
+    if (msg.sender !== currentUser.uid) return false;
+    const msgTime = msg.time?.toDate ? msg.time.toDate() : new Date(msg.time);
+    return (Date.now() - msgTime.getTime()) < 5 * 60 * 1000; // 5 minutes
+}
+
+async function startEditMessage(msg, chatType) {
+    if (!canEditOrDelete(msg)) {
+        toastManager.show({ icon: null, type: 'info', title: 'Cannot edit', body: 'Messages can only be edited within 5 minutes of sending.', duration: 3000 });
+        return;
+    }
+    editingMsgId = msg.id;
+    editingChatType = chatType;
+
+    const inputId = chatType === 'group' ? 'groupMsg' : 'msg';
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    input.value = msg.text || '';
+    input.focus();
+    input.style.height = 'auto';
+    input.style.height = input.scrollHeight + 'px';
+
+    // Show edit bar
+    const barId = chatType === 'group' ? 'groupEditBar' : 'directEditBar';
+    let bar = document.getElementById(barId);
+    const containerId = chatType === 'group' ? 'groupMsg' : 'msg';
+    if (!bar) {
+        const inputArea = document.getElementById(containerId)?.closest('.message-input');
+        if (inputArea) {
+            bar = document.createElement('div');
+            bar.id = barId;
+            bar.className = 'edit-bar';
+            bar.innerHTML = `
+                <div class="edit-bar-inner">
+                    <span class="edit-bar-icon">${window.Icons ? window.Icons.get('edit', 16) : '✏️'}</span>
+                    <span class="edit-bar-label">Editing message</span>
+                    <button class="edit-bar-cancel" id="${barId}Cancel">${window.Icons ? window.Icons.get('close', 16) : '✕'}</button>
+                </div>
+            `;
+            inputArea.insertBefore(bar, inputArea.firstChild);
+            document.getElementById(barId + 'Cancel').onclick = () => cancelEdit(barId, inputId);
+        }
+    } else {
+        bar.style.display = '';
+    }
+}
+
+function cancelEdit(barId, inputId) {
+    editingMsgId = null;
+    editingChatType = null;
+    const bar = document.getElementById(barId);
+    if (bar) bar.style.display = 'none';
+    const input = document.getElementById(inputId);
+    if (input) { input.value = ''; }
+}
+
+async function saveEditedMessage(text, chatType) {
+    if (!editingMsgId) return false;
+    const collection = chatType === 'group' ? 'groupMessages' : 'messages';
+    try {
+        await db.collection(collection).doc(editingMsgId).update({
+            text,
+            editedAt: new Date(),
+            edited: true
+        });
+        const barId = chatType === 'group' ? 'groupEditBar' : 'directEditBar';
+        const inputId = chatType === 'group' ? 'groupMsg' : 'msg';
+        cancelEdit(barId, inputId);
+        toastManager.show({ icon: null, type: 'success', title: 'Message edited', body: '', duration: 2000 });
+        return true;
+    } catch (e) {
+        console.error('Edit error:', e);
+        return false;
+    }
+}
+
+// ============================================================
+//  FEATURE: Schedule Message
+// ============================================================
+let scheduleForChatType = null;
+
+function showScheduleModal(chatType) {
+    scheduleForChatType = chatType;
+    const inputId = chatType === 'group' ? 'groupMsg' : 'msg';
+    const text = document.getElementById(inputId)?.value?.trim();
+
+    if (!text) {
+        toastManager.show({ icon: null, type: 'info', title: 'Type a message first', body: 'Write your message before scheduling.', duration: 2500 });
+        return;
+    }
+
+    // Min datetime = now + 1 min
+    const minDate = new Date(Date.now() + 60000);
+    const minStr = minDate.toISOString().slice(0, 16);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'delete-overlay';
+    overlay.id = 'scheduleOverlay';
+    overlay.innerHTML = `
+        <div class="delete-sheet schedule-sheet">
+            <p class="delete-sheet-title">📅 Schedule Message</p>
+            <div class="schedule-preview">${escapeHTML(text.substring(0, 80))}${text.length > 80 ? '…' : ''}</div>
+            <label class="schedule-label">Send at</label>
+            <input type="datetime-local" id="scheduleTime" class="schedule-input" min="${minStr}" value="${minStr}">
+            <button class="delete-opt" id="confirmScheduleBtn" style="background:var(--accent);color:#fff;margin-top:12px;">Schedule</button>
+            <button class="delete-opt delete-cancel">Cancel</button>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    document.getElementById('confirmScheduleBtn').onclick = () => confirmScheduleMessage(text, chatType);
+    overlay.querySelector('.delete-cancel').onclick = () => overlay.remove();
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+}
+
+async function confirmScheduleMessage(text, chatType) {
+    const timeInput = document.getElementById('scheduleTime');
+    if (!timeInput?.value) return;
+
+    const scheduledAt = new Date(timeInput.value);
+    if (scheduledAt <= new Date()) {
+        toastManager.show({ icon: null, type: 'info', title: 'Choose a future time', body: '', duration: 2000 });
+        return;
+    }
+
+    const scheduledMsg = {
+        text,
+        chatType,
+        scheduledAt: scheduledAt.getTime(),
+        sender: currentUser.uid,
+        createdAt: Date.now()
+    };
+
+    if (chatType === 'group') {
+        scheduledMsg.groupId = groupChatID;
+        scheduledMsg.senderName = currentUserData?.name || 'User';
+    } else {
+        scheduledMsg.chatWithUID = chatWithUID;
+        scheduledMsg.chatId = generateChatId(currentUser.uid, chatWithUID);
+    }
+
+    // Save to Firestore scheduled_messages collection
+    await db.collection('scheduled_messages').add(scheduledMsg);
+
+    // Clear input
+    const inputId = chatType === 'group' ? 'groupMsg' : 'msg';
+    const input = document.getElementById(inputId);
+    if (input) { input.value = ''; input.style.height = 'auto'; }
+
+    document.getElementById('scheduleOverlay')?.remove();
+
+    const timeStr = scheduledAt.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    toastManager.show({ icon: null, type: 'success', title: 'Message scheduled!', body: `Will send at ${timeStr}`, duration: 3500 });
+
+    // Start local scheduler to fire at the right time
+    const delay = scheduledAt.getTime() - Date.now();
+    setTimeout(() => dispatchScheduledMessage(scheduledMsg), delay);
+}
+
+async function dispatchScheduledMessage(msg) {
+    try {
+        if (msg.chatType === 'group') {
+            await db.collection('groupMessages').add({
+                groupId: msg.groupId,
+                sender: msg.sender,
+                senderName: msg.senderName,
+                text: msg.text,
+                time: new Date(),
+                type: 'text',
+                delivered: true,
+                seenBy: []
+            });
+        } else {
+            await db.collection('messages').add({
+                chatId: msg.chatId,
+                participants: [msg.sender, msg.chatWithUID],
+                sender: msg.sender,
+                text: msg.text,
+                time: new Date(),
+                type: 'text',
+                delivered: true,
+                seenBy: []
+            });
+            await db.collection('users').doc(msg.chatWithUID).update({
+                [`unreadCounts.${msg.chatId}`]: firebase.firestore.FieldValue.increment(1)
+            });
+        }
+        // Mark as sent in Firestore
+        await db.collection('scheduled_messages')
+            .where('chatId', '==', msg.chatId || '')
+            .where('scheduledAt', '==', msg.scheduledAt)
+            .get().then(snap => snap.forEach(d => d.ref.update({ sent: true })));
+    } catch (e) {
+        console.error('Scheduled message dispatch error:', e);
+    }
+}
+
+// Re-register pending scheduled messages on page load
+async function restoreScheduledMessages() {
+    try {
+        const snap = await db.collection('scheduled_messages')
+            .where('sender', '==', currentUser.uid)
+            .where('sent', '==', false)
+            .get();
+        snap.forEach(doc => {
+            const msg = doc.data();
+            const delay = msg.scheduledAt - Date.now();
+            if (delay > 0) {
+                setTimeout(() => dispatchScheduledMessage(msg), delay);
+            } else {
+                // Overdue — send immediately
+                dispatchScheduledMessage(msg);
+            }
+        });
+    } catch (e) { /* collection may not exist yet */ }
+}
+
+window.showScheduleModal = showScheduleModal;
+window.startEditMessage  = startEditMessage;
+window.cancelEdit        = cancelEdit;
+
+
 // ── Expose ───────────────────────────────────────────────────
 window.displayMessages       = displayMessages;
 window.displayGroupMessages  = displayGroupMessages;
@@ -1011,5 +1341,12 @@ window.onTypingInput         = onTypingInput;
 window.clearTypingIndicator  = clearTypingIndicator;
 window.injectArchiveButton   = injectArchiveButton;
 window.scrollToBottom        = scrollToBottom;
+window.showScheduleModal     = showScheduleModal;
+window.startEditMessage      = startEditMessage;
+window.cancelEdit            = cancelEdit;
+
+// Restore pending scheduled messages
+if (window.currentUser) restoreScheduledMessages();
+document.addEventListener('authReady', () => restoreScheduledMessages());
 
 console.log('messaging.js loaded');
