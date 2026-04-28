@@ -92,6 +92,16 @@ async function sendLoginOtp(user) {
     currentOtp = '';
     currentOtpExpiry = 0;
 
+    // ── Show modal immediately — don't wait for SMTP round-trip ──
+    const modal = ensureOtpModal();
+    document.getElementById('loginOtpEmail').textContent = user.email;
+    document.getElementById('loginOtpInput').value = '';
+    document.getElementById('loginOtpError').textContent = 'Sending OTP to your email…';
+    document.getElementById('verifyLoginOtp').disabled = true;
+    document.getElementById('resendLoginOtp').disabled = true;
+    modal.style.display = 'flex';
+    document.getElementById('loginOtpInput').focus();
+
     let response;
     try {
         response = await fetch('/send-otp', {
@@ -104,19 +114,18 @@ async function sendLoginOtp(user) {
         response = { ok: false, error: 'Failed to send OTP. Check SMTP settings.' };
     }
 
+    document.getElementById('verifyLoginOtp').disabled = false;
+
     if (!response?.ok) {
         otpSendInFlight = false;
         lastOtpKey = '';
+        modal.style.display = 'none';
+        await auth.signOut();
         alert(response?.error || 'Failed to send OTP.');
         return;
     }
 
-    const modal = ensureOtpModal();
-    document.getElementById('loginOtpEmail').textContent = user.email;
-    document.getElementById('loginOtpInput').value = '';
     document.getElementById('loginOtpError').textContent = '';
-    modal.style.display = 'flex';
-    document.getElementById('loginOtpInput').focus();
     startResendCountdown();
     otpSendInFlight = false;
 }
