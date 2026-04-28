@@ -187,6 +187,8 @@ async function openChat(friendUID) {
     if (defaultChat)        defaultChat.style.display        = 'none';
     if (individualChat)     individualChat.style.display     = 'flex';
     if (groupChatContainer) groupChatContainer.style.display = 'none';
+    const aiChatPane = document.getElementById('aiChatPane');
+    if (aiChatPane)         aiChatPane.style.display         = 'none';
 
     if (window._hideSidebarOnMobile) window._hideSidebarOnMobile();
 
