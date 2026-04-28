@@ -523,3 +523,36 @@
 @media (max-width: 480px) {
     .fp-tab-panel { max-height: 45vh; }
 }
+
+/* ── QR Tab ──────────────────────────────────────────────────── */
+.fp-qr-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 16px 24px;
+    gap: 14px;
+}
+.fp-qr-label {
+    font-size: 13px;
+    color: var(--text-secondary, #6b7280);
+    text-align: center;
+    margin: 0;
+}
+.fp-qr-box {
+    background: #fff;
+    border-radius: 12px;
+    padding: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.fp-qr-box canvas, .fp-qr-box img {
+    display: block;
+    border-radius: 4px;
+}
+.fp-qr-share-btn {
+    width: auto;
+    padding: 8px 24px;
+    font-size: 13px;
+}
