@@ -3664,6 +3664,13 @@ body {
     border-radius: 12px;
     padding: 14px 18px;
 }
+.otv-text-content {
+    margin: 0;
+    font-size: 17px;
+    color: var(--text-primary, #eee);
+    line-height: 1.6;
+    word-break: break-word;
+}
 .otv-modal-footer {
     display: flex;
     align-items: center;
