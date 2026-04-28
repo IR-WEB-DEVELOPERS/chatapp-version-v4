@@ -485,7 +485,49 @@ const GroupCallManager = (() => {
         } catch(e) { return 0; }
     }
 
-    return { startCall, endCall, checkActiveCall };
+    // ─────────────────────────────────────────────────────────
+    //  PUBLIC: Join an existing group call room
+    //  Used when a 1-1 call is upgraded — the 3rd person gets
+    //  a Firestore invite and calls this to join the mesh room.
+    // ─────────────────────────────────────────────────────────
+    async function joinExistingCall(roomId, isVideo = true) {
+        if (_active) {
+            console.warn('Already in a call, cannot join another');
+            return;
+        }
+        await startCall(roomId, isVideo);
+    }
+
+    // ─────────────────────────────────────────────────────────
+    //  PUBLIC: Send a Firestore invite to a user to join the
+    //  current group-call room. The invitee's listener shows
+    //  an incoming-call UI and calls joinExistingCall() on accept.
+    // ─────────────────────────────────────────────────────────
+    async function inviteToRoom(targetUID, roomId, isVideo = true) {
+        try {
+            const callerName = window.currentUserData?.name || 'Someone';
+            await window.db.collection('groupCallInvites').add({
+                to:       targetUID,
+                from:     window.currentUser.uid,
+                fromName: callerName,
+                roomId:   roomId,
+                isVideo:  isVideo,
+                status:   'pending',
+                created:  new Date()
+            });
+            console.log('✅ Group call invite sent to', targetUID);
+            return true;
+        } catch(e) {
+            console.error('Error sending group call invite:', e);
+            return false;
+        }
+    }
+
+    // Expose room info for the 1-1 → group upgrade path
+    function getRoomId() { return _roomId; }
+    function isActive()  { return _active; }
+
+    return { startCall, endCall, checkActiveCall, joinExistingCall, inviteToRoom, getRoomId, isActive };
 
 })();
 
