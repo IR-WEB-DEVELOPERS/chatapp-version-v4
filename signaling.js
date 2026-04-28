@@ -8,6 +8,11 @@ class SignalingManager {
         // Better reconnection settings
         this.reconnectTimeout = null;
         this.maxReconnectDelay = 5000;
+
+        // BUG 1 FIX: Track processed ICE candidates to prevent duplicate addIceCandidate()
+        // calls on every Firestore snapshot update. Without this Set, every snapshot
+        // re-processes ALL candidates → InvalidStateError on already-applied candidates.
+        this._processedCandidates = new Set();
         
         console.log('🚀 SignalingManager created');
     }
@@ -229,6 +234,9 @@ class SignalingManager {
 
             console.log('📞 Handling incoming call offer:', callId, '(age:', Math.round(ageSeconds), 's)');
 
+            // BUG 1 FIX: Reset processed candidates set for the new call session
+            this._processedCandidates.clear();
+
             const offer = new RTCSessionDescription({
                 type: callData.offer.type,
                 sdp: callData.offer.sdp
@@ -262,6 +270,8 @@ class SignalingManager {
         console.log('📤 Handling outgoing call update:', callData.type, callData.status);
         
         if (callData.status === 'answered') {
+            // BUG 1 FIX: Reset processed candidates set when a new call is answered
+            this._processedCandidates.clear();
             this.handleAnswer(callId, callData);
         } else if (callData.status === 'ended') {
             this.handleCallEnd(callId, callData);
@@ -299,6 +309,17 @@ class SignalingManager {
         
         candidates.forEach((candidate, index) => {
             if (candidate.type === 'candidate' && candidate.candidate) {
+                // BUG 1 FIX: Deduplicate using a fingerprint key built from the candidate
+                // string. Firestore snapshots fire on every document update (including
+                // unrelated field changes), so without this guard every snapshot re-adds
+                // ALL candidates → InvalidStateError / duplicate-candidate errors.
+                const candidateKey = `${callId}::${candidate.candidate}::${candidate.sdpMid}::${candidate.sdpMLineIndex}`;
+                if (this._processedCandidates.has(candidateKey)) {
+                    console.log(`⏭️ Skipping already-processed ICE candidate ${index + 1}`);
+                    return;
+                }
+                this._processedCandidates.add(candidateKey);
+
                 try {
                     const iceCandidate = new RTCIceCandidate({
                         candidate: candidate.candidate,
@@ -330,6 +351,9 @@ class SignalingManager {
             window.webRTCManager.handleCallDisconnected();
         }
         
+        // BUG 1 FIX: Clear processed candidates when call ends
+        this._processedCandidates.clear();
+        
         this.cleanupCallDocument(callId);
     }
 
@@ -339,6 +363,9 @@ class SignalingManager {
         if (window.webRTCManager) {
             window.webRTCManager.handleCallDisconnected();
         }
+        
+        // BUG 1 FIX: Clear processed candidates when call is declined
+        this._processedCandidates.clear();
         
         // Show notification to user
         if (window.modalManager) {
@@ -423,6 +450,7 @@ class SignalingManager {
     reset() {
         this.initialized = false;
         this.callCollection = null;
+        this._processedCandidates.clear();
     }
 }
 
