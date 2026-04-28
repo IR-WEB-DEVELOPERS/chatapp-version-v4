@@ -699,6 +699,154 @@
             }
         });
     </script>
+    <!-- Pull-to-Refresh on Sidebar -->
+    <script>
+    (function initPullToRefresh() {
+        const THRESHOLD   = 80;   // px drag needed to trigger refresh
+        const MAX_PULL    = 110;  // max visual pull distance
+
+        let startY = 0, currentY = 0, pulling = false, triggered = false;
+
+        // Indicator element
+        const indicator = document.createElement('div');
+        indicator.id = 'pullRefreshIndicator';
+        indicator.style.cssText = `
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            height: 0;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding-bottom: 6px;
+            overflow: hidden;
+            z-index: 99999;
+            pointer-events: none;
+            transition: background 0.2s;
+            background: transparent;
+        `;
+        indicator.innerHTML = `
+            <div id="pullRefreshIcon" style="
+                display:flex;align-items:center;gap:6px;
+                font-size:0.8rem;font-weight:500;
+                color:var(--text-secondary,#888);
+                opacity:0;
+                transition:opacity 0.15s, transform 0.15s;
+                transform:scale(0.8);
+            ">
+                <span id="pullRefreshSvg" style="display:inline-flex;transition:transform 0.3s;"></span>
+                <span id="pullRefreshLabel">Pull to refresh</span>
+            </div>
+        `;
+        document.body.appendChild(indicator);
+
+        function getSidebar() {
+            return document.querySelector('.sidebar');
+        }
+
+        function isSidebarVisible() {
+            const sb = getSidebar();
+            return sb && !sb.classList.contains('mobile-hidden');
+        }
+
+        function isMobile() {
+            return window.innerWidth <= 599;
+        }
+
+        function setIndicator(progress, ready) {
+            const h = Math.min(progress * MAX_PULL, MAX_PULL);
+            indicator.style.height = h + 'px';
+            const icon = document.getElementById('pullRefreshIcon');
+            const svgEl = document.getElementById('pullRefreshSvg');
+            const label = document.getElementById('pullRefreshLabel');
+            if (!icon) return;
+
+            const opacity = Math.min(progress * 2, 1);
+            icon.style.opacity = opacity;
+            icon.style.transform = `scale(${0.8 + 0.2 * Math.min(progress, 1)})`;
+
+            if (window.Icons && svgEl && !svgEl._hydrated) {
+                svgEl.innerHTML = window.Icons.get('refresh', 18);
+                svgEl._hydrated = true;
+            }
+
+            if (ready) {
+                svgEl.style.transform = 'rotate(180deg)';
+                label.textContent = 'Release to refresh';
+                indicator.style.background = 'var(--accent,#6c63ff)22';
+                icon.style.color = 'var(--accent,#6c63ff)';
+            } else {
+                svgEl.style.transform = `rotate(${progress * 180}deg)`;
+                label.textContent = 'Pull to refresh';
+                indicator.style.background = 'transparent';
+                icon.style.color = 'var(--text-secondary,#888)';
+            }
+        }
+
+        function resetIndicator() {
+            indicator.style.transition = 'height 0.25s ease';
+            indicator.style.height = '0px';
+            setTimeout(() => { indicator.style.transition = ''; }, 300);
+            const icon = document.getElementById('pullRefreshIcon');
+            if (icon) icon.style.opacity = '0';
+            indicator.style.background = 'transparent';
+        }
+
+        function doRefresh() {
+            // Spinner animation while refreshing
+            const svgEl = document.getElementById('pullRefreshSvg');
+            if (svgEl) svgEl.style.animation = 'ptr-spin 0.6s linear infinite';
+            const label = document.getElementById('pullRefreshLabel');
+            if (label) label.textContent = 'Refreshing…';
+            indicator.style.height = '52px';
+
+            const style = document.createElement('style');
+            style.textContent = '@keyframes ptr-spin{to{transform:rotate(360deg)}}';
+            document.head.appendChild(style);
+
+            setTimeout(() => window.location.reload(), 500);
+        }
+
+        document.addEventListener('touchstart', (e) => {
+            if (!isMobile()) return;
+            if (!isSidebarVisible()) return;
+
+            const sb = getSidebar();
+            // Only trigger if sidebar scroll is at top
+            if (sb && sb.scrollTop > 0) return;
+
+            startY   = e.touches[0].clientY;
+            currentY = startY;
+            pulling  = true;
+            triggered = false;
+            indicator.style.transition = '';
+        }, { passive: true });
+
+        document.addEventListener('touchmove', (e) => {
+            if (!pulling || !isMobile()) return;
+            if (!isSidebarVisible()) { pulling = false; return; }
+
+            currentY = e.touches[0].clientY;
+            const delta = currentY - startY;
+            if (delta <= 0) { resetIndicator(); return; }
+
+            const progress = Math.min(delta / THRESHOLD, 1.3);
+            triggered = delta >= THRESHOLD;
+            setIndicator(progress, triggered);
+        }, { passive: true });
+
+        document.addEventListener('touchend', () => {
+            if (!pulling) return;
+            pulling = false;
+
+            if (triggered) {
+                doRefresh();
+            } else {
+                resetIndicator();
+            }
+        });
+    })();
+    </script>
+
 </body>
 </html>
 
