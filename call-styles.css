@@ -62,6 +62,7 @@
     border-radius: 8px;
     border: 2px solid #4299e1;
     background: #4a5568;
+    transform: scaleX(-1); /* un-mirror front camera */
 }
 
 .voice-call-display {
@@ -328,6 +329,7 @@
     background: #2d3748;
     z-index: 10;
     box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    transform: scaleX(-1); /* un-mirror front camera */
 }
 
 /* Header compact */
