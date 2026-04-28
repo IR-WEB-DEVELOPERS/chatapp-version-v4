@@ -226,11 +226,11 @@
                     <div class="message-input-container">
                         <button class="emoji-toggle" title="Add Emoji" data-icon-btn="emoji"></button>
                         <button class="attach-btn" data-chat="direct" title="Attach file" data-icon-btn="paperclip"></button>
-                        <button class="otv-toggle-btn" id="otvBtn" title="One-time view" onclick="toggleOneTimeView(this)">👁</button>
+                        <button class="otv-toggle-btn" id="otvBtn" title="One-time view" onclick="toggleOneTimeView(this)" data-icon-btn="eyeView"></button>
                         <textarea id="msg" placeholder="Type a message..." rows="1"></textarea>
                         <span id="voiceTimer" class="voice-timer" style="display:none;">00:00</span>
                         <button id="voiceBtn" class="voice-record-btn" title="Voice message" onclick="startVoiceRecording('direct')" data-icon-btn="mic"></button>
-                        <button class="schedule-btn" title="Schedule message" onclick="showScheduleModal('direct')" data-icon-btn="schedule">📅</button>
+                        <button class="schedule-btn" title="Schedule message" onclick="showScheduleModal('direct')" data-icon-btn="calendar"></button>
                         <button id="sendBtn" class="send-btn" data-icon-btn="send"></button>
                     </div>
                 </div>
@@ -276,11 +276,11 @@
                     <div class="message-input-container">
                         <button class="emoji-toggle" title="Add Emoji" data-icon-btn="emoji"></button>
                         <button class="attach-btn" data-chat="group" title="Attach file" data-icon-btn="paperclip"></button>
-                        <button class="otv-toggle-btn" id="otvGroupBtn" title="One-time view" onclick="toggleOneTimeView(this)">👁</button>
+                        <button class="otv-toggle-btn" id="otvGroupBtn" title="One-time view" onclick="toggleOneTimeView(this)" data-icon-btn="eyeView"></button>
                         <textarea id="groupMsg" placeholder="Type a message..." rows="1"></textarea>
                         <span id="groupVoiceTimer" class="voice-timer" style="display:none;">00:00</span>
                         <button id="groupVoiceBtn" class="voice-record-btn" title="Voice message" onclick="startVoiceRecording('group')" data-icon-btn="mic"></button>
-                        <button class="schedule-btn" title="Schedule message" onclick="showScheduleModal('group')" data-icon-btn="schedule">📅</button>
+                        <button class="schedule-btn" title="Schedule message" onclick="showScheduleModal('group')" data-icon-btn="calendar"></button>
                         <button id="sendGroupBtn" class="send-btn" data-icon-btn="send"></button>
                     </div>
                 </div>
@@ -645,7 +645,7 @@
                 font-size:.85rem;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,.3);
                 display:flex;align-items:center;gap:8px;white-space:nowrap;
             `;
-            banner.innerHTML = `<span style="animation:_swSpin 1s linear infinite;display:inline-block">🔄</span> Updating app…`;
+            banner.innerHTML = `<span style="animation:_swSpin 1s linear infinite;display:inline-block;line-height:1">${window.Icons ? window.Icons.get('refresh', 16) : '↻'}</span> Updating app…`;
             document.body.appendChild(banner);
         }
     </script>
