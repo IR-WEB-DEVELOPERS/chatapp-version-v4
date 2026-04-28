@@ -616,6 +616,11 @@ async function sendMessage() {
             seenBy: []
         };
         if (replyingTo) msgData.replyTo = replyingTo;
+        // Vanish mode flag — if vanish mode is on for this chat
+        const _vanishKey = `vanishMode_${chatId}`;
+        if (localStorage.getItem(_vanishKey) === 'true') {
+            msgData.vanishMode = true;
+        }
         // One Time View flag — set by toggle button
         if (window._oneTimeViewEnabled) {
             msgData.oneTimeView = true;
