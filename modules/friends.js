@@ -5,6 +5,20 @@
 // ── Last-message subscriber map: chatId → unsubscribe fn ─────
 const _lastMsgUnsubMap = new Map();
 
+// ── User profile real-time listener map: uid → unsubscribe fn ─
+const _userUnsubMap = new Map();
+
+function _subscribeUserProfile(uid) {
+    if (_userUnsubMap.has(uid)) return;
+    const unsub = db.collection('users').doc(uid).onSnapshot(snap => {
+        if (!snap.exists) return;
+        const data = snap.data();
+        enhancedCache.set(`user_${uid}`, data, 30 * 60 * 1000);
+        _renderFriendsList();
+    }, err => console.warn('User profile listener error:', err));
+    _userUnsubMap.set(uid, unsub);
+}
+
 function _subscribeLastMsg(chatId) {
     if (_lastMsgUnsubMap.has(chatId)) return;
     const unsub = db.collection('messages')
@@ -97,7 +111,7 @@ function _renderFriendsList() {
 
     // Skip re-render if nothing changed (saves DOM thrash)
     const renderKey = entries.map(e =>
-        `${e.friendUID}:${e.lastTime}:${unreadMap[e.chatId] || 0}:${e.friendData?.status}`
+        `${e.friendUID}:${e.lastTime}:${unreadMap[e.chatId] || 0}:${e.friendData?.status}:${e.friendData?.name}:${e.friendData?.photoURL}`
     ).join('|');
     if (renderKey === _lastFriendsRenderKey) return;
     _lastFriendsRenderKey = renderKey;
@@ -172,12 +186,13 @@ async function loadFriendsList() {
         }));
     }
 
-    // Subscribe last-message per chat (idempotent)
+    // Subscribe last-message per chat + user profile changes (idempotent)
     const activeChatIds = new Set();
     allUIDs.forEach(uid => {
         const chatId = generateChatId(currentUser.uid, uid);
         activeChatIds.add(chatId);
         _subscribeLastMsg(chatId);
+        _subscribeUserProfile(uid); // real-time name/avatar updates
     });
     _pruneLastMsgSubs(activeChatIds);
 
