@@ -1396,47 +1396,72 @@ async function openOneTimeViewMessage(msgId, chatType) {
         // 1. Mark as opened immediately so UI updates
         await db.collection(collection).doc(msgId).update({ oneTimeViewOpened: true });
 
-        // 2. Fetch the message to show text in a modal overlay
+        // 2. Fetch the message to show content in a modal overlay
         const snap = await db.collection(collection).doc(msgId).get();
         const data = snap.data();
         if (!data) return;
 
-        // Show fullscreen overlay with countdown
+        // Determine if this is a file/image (non-text) message
+        const isFileOrImage = data.type === 'file' || data.type === 'image' ||
+            (data.fileMime && data.fileMime.length > 0) ||
+            (data.fileUrl && data.fileUrl.length > 0);
+
+        // Build modal body content
+        let modalBodyHtml;
+        if (isFileOrImage && window.driveShare) {
+            modalBodyHtml = window.driveShare.renderFileMessage(data, false);
+        } else {
+            modalBodyHtml = `<p class="otv-text-content">${escapeHTML(data.text || '')}</p>`;
+        }
+
+        // For text: show close button, no auto-timer
+        // For files/images: 10s forced countdown, close button disabled until expired
+        const TIMER_SECS = 10;
+
+        const footerHtml = isFileOrImage
+            ? `<span class="otv-countdown" id="otvCountdown">Closes in ${TIMER_SECS}s…</span>
+               <button class="otv-close-btn" id="otvCloseBtn" disabled style="opacity:0.4;cursor:not-allowed">Please wait…</button>`
+            : `<span class="otv-countdown" id="otvCountdown"></span>
+               <button class="otv-close-btn" id="otvCloseBtn" onclick="this.closest('.otv-overlay').dispatchEvent(new Event('otvclose'))">Close</button>`;
+
+        // Show fullscreen overlay
         const overlay = document.createElement('div');
         overlay.className = 'otv-overlay';
         overlay.innerHTML = `
             <div class="otv-modal">
-                <div class="otv-modal-header"><span class="otv-eye-icon" style="font-size:28px">👁</span> One-Time Message</div>
-                <div class="otv-modal-body">${escapeHTML(data.text || '')}</div>
+                <div class="otv-modal-header"><span class="otv-eye-icon" style="font-size:28px">👁</span> One-Time View</div>
+                <div class="otv-modal-body">${modalBodyHtml}</div>
                 <div class="otv-modal-footer">
-                    <span class="otv-countdown" id="otvCountdown">Deletes in 5s…</span>
-                    <button class="otv-close-btn" onclick="this.closest('.otv-overlay').dispatchEvent(new Event('otvclose'))">Close now</button>
+                    ${footerHtml}
                 </div>
             </div>
         `;
         document.body.appendChild(overlay);
 
-        // Countdown timer
-        let secs = 5;
-        const countEl = overlay.querySelector('#otvCountdown');
-        const timer = setInterval(() => {
-            secs--;
-            if (countEl) countEl.textContent = secs > 0 ? `Deletes in ${secs}s…` : 'Deleted!';
-            if (secs <= 0) {
-                clearInterval(timer);
-                overlay.remove();
-                // 3. Hard delete (deletedForAll) after viewing
-                db.collection(collection).doc(msgId).update({ deletedForAll: true })
-                    .catch(e => console.error('OTV delete error:', e));
-            }
-        }, 1000);
+        const countEl  = overlay.querySelector('#otvCountdown');
+        const closeBtn = overlay.querySelector('#otvCloseBtn');
 
-        overlay.addEventListener('otvclose', () => {
-            clearInterval(timer);
+        function deleteAndClose() {
             overlay.remove();
             db.collection(collection).doc(msgId).update({ deletedForAll: true })
                 .catch(e => console.error('OTV delete error:', e));
-        });
+        }
+
+        if (isFileOrImage) {
+            // Forced 10s countdown — close button unlocks only after timer ends
+            let secs = TIMER_SECS;
+            const timer = setInterval(() => {
+                secs--;
+                if (countEl) countEl.textContent = secs > 0 ? `Closes in ${secs}s…` : 'Deleted!';
+                if (secs <= 0) {
+                    clearInterval(timer);
+                    deleteAndClose();
+                }
+            }, 1000);
+        } else {
+            // Text messages — no auto-close, user must manually close
+            overlay.addEventListener('otvclose', deleteAndClose);
+        }
     } catch (e) {
         console.error('OTV open error:', e);
     }
