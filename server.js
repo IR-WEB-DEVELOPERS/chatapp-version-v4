@@ -368,49 +368,103 @@ app.get('/firebase-config', (req, res) => {
     res.json(cfg);
 });
 
-// ── Groq AI proxy — keeps GROQ_API_KEY off the browser ────────────
-app.post('/api/ai-chat', async (req, res) => {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) return res.status(503).json({ error: 'AI not configured. Set GROQ_API_KEY env variable.' });
+// ── Multi-Provider AI proxy — Groq → Gemini → OpenRouter fallback ──
+// Providers are tried in order; if one fails or hits rate limits, next is used.
+// Set any/all of these env vars: GROQ_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY
 
+async function tryGroq(groqMessages) {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) return null;
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({ model: 'llama-3.1-8b-instant', max_tokens: 1000, messages: groqMessages })
+    });
+    if (response.status === 429 || response.status === 503) return null; // rate limited, try next
+    if (!response.ok) throw new Error(`Groq ${response.status}`);
+    const data = await response.json();
+    return { text: data.choices?.[0]?.message?.content || '...', provider: 'groq' };
+}
+
+async function tryGemini(messages, system) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return null;
+    // Convert messages to Gemini format
+    const contents = messages.map(m => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }]
+    }));
+    const body = {
+        system_instruction: system ? { parts: [{ text: system }] } : undefined,
+        contents,
+        generationConfig: { maxOutputTokens: 1000 }
+    };
+    const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    );
+    if (response.status === 429 || response.status === 503) return null; // rate limited, try next
+    if (!response.ok) throw new Error(`Gemini ${response.status}`);
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '...';
+    return { text, provider: 'gemini' };
+}
+
+async function tryOpenRouter(groqMessages) {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return null;
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            'HTTP-Referer': process.env.APP_URL || 'https://educhat.app',
+            'X-Title': 'EduChat AI'
+        },
+        body: JSON.stringify({ model: 'meta-llama/llama-3.2-3b-instruct:free', max_tokens: 1000, messages: groqMessages })
+    });
+    if (response.status === 429 || response.status === 503) return null;
+    if (!response.ok) throw new Error(`OpenRouter ${response.status}`);
+    const data = await response.json();
+    return { text: data.choices?.[0]?.message?.content || '...', provider: 'openrouter' };
+}
+
+app.post('/api/ai-chat', async (req, res) => {
     const { messages, system } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ error: 'messages array required' });
     }
 
-    // Groq uses OpenAI-compatible format — system goes as first message
-    const groqMessages = [
-        { role: 'system', content: system || '' },
-        ...messages
+    const groqMessages = [{ role: 'system', content: system || '' }, ...messages];
+    const errors = [];
+
+    // Try providers in order: Groq (fastest) → Gemini (high limits) → OpenRouter (free fallback)
+    const providers = [
+        () => tryGroq(groqMessages),
+        () => tryGemini(messages, system),
+        () => tryOpenRouter(groqMessages)
     ];
 
-    try {
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-                model: 'llama-3.1-8b-instant',
-                max_tokens: 1000,
-                messages: groqMessages
-            })
-        });
-
-        if (!response.ok) {
-            const err = await response.text();
-            console.error('Groq API error:', response.status, err);
-            return res.status(response.status).json({ error: 'AI request failed' });
+    for (const tryProvider of providers) {
+        try {
+            const result = await tryProvider();
+            if (result) {
+                console.log(`[AI] Responded via ${result.provider}`);
+                return res.json({ text: result.text });
+            }
+        } catch (err) {
+            console.warn(`[AI] Provider error: ${err.message}`);
+            errors.push(err.message);
         }
-
-        const data = await response.json();
-        const text = data.choices?.[0]?.message?.content || '...';
-        res.json({ text });
-    } catch (err) {
-        console.error('AI proxy error:', err.message);
-        res.status(500).json({ error: 'AI proxy error' });
     }
+
+    // All providers failed or not configured
+    const noKeys = !process.env.GROQ_API_KEY && !process.env.GEMINI_API_KEY && !process.env.OPENROUTER_API_KEY;
+    if (noKeys) {
+        return res.status(503).json({ error: 'AI not configured. Set GROQ_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY.' });
+    }
+    console.error('[AI] All providers failed:', errors);
+    res.status(503).json({ error: 'AI temporarily unavailable. Please try again.' });
 });
 
 // ── Static files — registered after API routes so dynamic endpoints win ──
