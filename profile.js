@@ -378,7 +378,12 @@ const storiesManager = (() => {
     }
 
     // ── Story Composer Modal ──────────────────────────────────
-    function _openComposer() {
+    // ── Instagram URL validator ───────────────────────────────
+    function _isInstagramURL(url) {
+        return /^https?:\/\/(www\.)?instagram\.com\/(p|reel|tv)\/[\w-]+/.test(url);
+    }
+
+    function _openComposer(prefillURL = '') {
         const overlay = document.createElement('div');
         overlay.className = 'story-composer-overlay';
         overlay.innerHTML = `
@@ -386,26 +391,23 @@ const storiesManager = (() => {
                 <h3>📸 Add Status</h3>
 
                 <div class="story-type-tabs">
-                    <button class="story-type-tab active" data-type="text">✍️ Text</button>
-                    <button class="story-type-tab" data-type="media">🖼️ Image / Video</button>
+                    <button class="story-type-tab ${!prefillURL ? 'active' : ''}" data-type="text">✍️ Text</button>
+                    <button class="story-type-tab ${prefillURL ? 'active' : ''}" data-type="instagram">📱 Instagram</button>
                 </div>
 
                 <!-- Text panel -->
-                <div id="storyTextPanel">
+                <div id="storyTextPanel" style="display:${!prefillURL ? 'block' : 'none'};">
                     <textarea class="story-text-input" id="storyTextInput"
                         placeholder="What's on your mind? Your status disappears in 24 hrs ⏳"
                         maxlength="280"></textarea>
                 </div>
 
-                <!-- Media panel -->
-                <div id="storyMediaPanel" style="display:none;">
-                    <label class="story-file-label" id="storyFileLabel">
-                        <span id="storyFileLabelText">📁 Choose Image or Video</span>
-                        <input type="file" id="storyFileInput" accept="image/*,video/*" style="display:none;">
-                    </label>
-                    <div id="storyUploadStatus" class="story-upload-status" style="display:none;"></div>
-                    <img class="story-image-preview" id="storyImgPreview" src="" alt="Preview" style="display:none;">
-                    <video class="story-video-preview" id="storyVideoPreview" controls style="display:none; max-width:100%; border-radius:8px; margin-top:8px;"></video>
+                <!-- Instagram panel -->
+                <div id="storyInstaPanel" style="display:${prefillURL ? 'block' : 'none'};">
+                    <input type="url" class="story-insta-input" id="storyInstaInput"
+                        placeholder="https://www.instagram.com/reel/..."
+                        value="${escapeAttribute(prefillURL)}">
+                    <div id="storyInstaPreview" class="story-insta-preview"></div>
                 </div>
 
                 <div class="story-composer-actions">
@@ -416,10 +418,7 @@ const storiesManager = (() => {
         `;
         document.body.appendChild(overlay);
 
-        // Internal state
-        let _uploadedMediaURL = null;  // Google Drive webViewLink
-        let _uploadedMediaType = null; // 'image' or 'video'
-        let _uploadedFileName = null;
+        let _instaEmbedData = null; // { url, thumbnailUrl, embedHtml, title }
 
         // Type tabs
         overlay.querySelectorAll('.story-type-tab').forEach(tab => {
@@ -427,96 +426,49 @@ const storiesManager = (() => {
                 overlay.querySelectorAll('.story-type-tab').forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
                 const type = tab.dataset.type;
-                document.getElementById('storyTextPanel').style.display  = type === 'text'  ? 'block' : 'none';
-                document.getElementById('storyMediaPanel').style.display = type === 'media' ? 'block' : 'none';
+                document.getElementById('storyTextPanel').style.display    = type === 'text'      ? 'block' : 'none';
+                document.getElementById('storyInstaPanel').style.display   = type === 'instagram' ? 'block' : 'none';
             };
         });
 
-        // Pre-fetch Drive token on label click — this IS a direct user gesture,
-        // so the OAuth popup is allowed here. By the time file is chosen and
-        // onchange fires, the token will already be cached.
-        const storyFileLabel = overlay.querySelector('label[for="storyFileInput"], label:has(#storyFileInput)') ||
-                               document.querySelector('label:has(#storyFileInput)');
-        const storyFileLabelClickHandler = () => {
-            // Try to warm up the token while we're still in a trusted gesture
-            const cached = sessionStorage.getItem('driveShareAccessToken');
-            const expiry = parseInt(sessionStorage.getItem('driveShareAccessTokenExpiry') || '0', 10);
-            if (!cached || Date.now() >= expiry) {
-                if (window.google?.accounts?.oauth2 && window.DRIVE_CLIENT_ID) {
-                    const warmupClient = google.accounts.oauth2.initTokenClient({
-                        client_id: window.DRIVE_CLIENT_ID,
-                        scope: 'https://www.googleapis.com/auth/drive.file',
-                        callback: (tokenResponse) => {
-                            if (!tokenResponse.error) {
-                                sessionStorage.setItem('driveShareAccessToken', tokenResponse.access_token);
-                                sessionStorage.setItem('driveShareAccessTokenExpiry', String(Date.now() + 55 * 60 * 1000));
-                            }
-                        },
-                        error_callback: () => {} // silent — file picker still opens
-                    });
-                    warmupClient.requestAccessToken({ prompt: '' });
-                }
-            }
-        };
-        // Attach to the label element wrapping storyFileInput
-        const storyInputEl = document.getElementById('storyFileInput');
-        if (storyInputEl?.parentElement?.tagName === 'LABEL') {
-            storyInputEl.parentElement.addEventListener('click', storyFileLabelClickHandler);
-        }
-
-        // File picker → local preview + auto Drive upload
-        document.getElementById('storyFileInput').onchange = async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            const isImage = file.type.startsWith('image/');
-            const isVideo = file.type.startsWith('video/');
-            if (!isImage && !isVideo) {
-                showToast('Please choose an image or video file', 'warning');
+        // Instagram URL input → fetch embed preview
+        let _debounceTimer = null;
+        const _fetchPreview = async (url) => {
+            const previewEl = document.getElementById('storyInstaPreview');
+            if (!url) { previewEl.innerHTML = ''; _instaEmbedData = null; return; }
+            if (!_isInstagramURL(url)) {
+                previewEl.innerHTML = `<p class="insta-preview-error">Instagram post/reel link paste చేయండి</p>`;
+                _instaEmbedData = null;
                 return;
             }
-
-            // Local preview
-            const localURL = URL.createObjectURL(file);
-            if (isImage) {
-                const prev = document.getElementById('storyImgPreview');
-                prev.src = localURL;
-                prev.style.display = 'block';
-                document.getElementById('storyVideoPreview').style.display = 'none';
-            } else {
-                const vprev = document.getElementById('storyVideoPreview');
-                vprev.src = localURL;
-                vprev.style.display = 'block';
-                document.getElementById('storyImgPreview').style.display = 'none';
-            }
-
-            // Update label
-            document.getElementById('storyFileLabelText').textContent = `📎 ${file.name}`;
-
-            // Auto upload to Google Drive
-            const statusEl = document.getElementById('storyUploadStatus');
-            statusEl.style.display = 'block';
-            statusEl.innerHTML = `<span class="upload-spinner">⏳</span> Uploading to Drive…`;
-
-            const postBtn = document.getElementById('storyPostBtn');
-            postBtn.disabled = true;
-            _uploadedMediaURL = null;
-
+            previewEl.innerHTML = `<p class="insta-preview-loading">⏳ Loading preview...</p>`;
             try {
-                const driveResult = await _uploadStatusFileToDrive(file);
-                _uploadedMediaURL  = driveResult.viewLink;
-                _uploadedMediaType = isImage ? 'image' : 'video';
-                _uploadedFileName  = file.name;
-                statusEl.innerHTML = `✅ Uploaded! Ready to post.`;
-                statusEl.style.color = '#22c55e';
-                postBtn.disabled = false;
+                const res = await fetch(`/instagram-embed?url=${encodeURIComponent(url)}`);
+                if (!res.ok) throw new Error('Preview fetch failed');
+                const data = await res.json();
+                _instaEmbedData = { url, ...data };
+                previewEl.innerHTML = `
+                    <div class="insta-preview-card">
+                        ${data.thumbnailUrl ? `<img src="${escapeAttribute(data.thumbnailUrl)}" class="insta-preview-thumb" alt="preview">` : ''}
+                        <p class="insta-preview-title">${escapeHTML(data.title || 'Instagram Reel')}</p>
+                        <span class="insta-preview-badge">Instagram</span>
+                    </div>`;
             } catch (err) {
-                console.error('Status Drive upload error:', err);
-                statusEl.innerHTML = `❌ Upload failed: ${err.message}`;
-                statusEl.style.color = '#ef4444';
-                postBtn.disabled = false;
+                previewEl.innerHTML = `<p class="insta-preview-error">Preview load అవ్వలేదు — link valid గా ఉంటే post చేయవచ్చు</p>`;
+                // Still allow posting with just the URL
+                _instaEmbedData = { url, thumbnailUrl: null, embedHtml: null, title: null };
             }
         };
+
+        document.getElementById('storyInstaInput').oninput = (e) => {
+            clearTimeout(_debounceTimer);
+            _debounceTimer = setTimeout(() => _fetchPreview(e.target.value.trim()), 600);
+        };
+
+        // If prefilled (from Instagram share), auto-fetch preview
+        if (prefillURL) {
+            setTimeout(() => _fetchPreview(prefillURL), 300);
+        }
 
         // Cancel
         document.getElementById('storyCancelBtn').onclick = () => overlay.remove();
@@ -532,14 +484,17 @@ const storiesManager = (() => {
                 if (!text) { showToast('Please enter some text', 'warning'); return; }
                 storyData = { type: 'text', text };
             } else {
-                if (!_uploadedMediaURL) {
-                    showToast('Please choose and wait for file to upload', 'warning');
+                const url = document.getElementById('storyInstaInput').value.trim();
+                if (!url || !_isInstagramURL(url)) {
+                    showToast('Valid Instagram link paste చేయండి', 'warning');
                     return;
                 }
                 storyData = {
-                    type: _uploadedMediaType,   // 'image' or 'video'
-                    imageURL: _uploadedMediaURL, // used for both image & video (viewer checks type)
-                    fileName: _uploadedFileName,
+                    type: 'instagram',
+                    instaURL: url,
+                    thumbnailUrl: _instaEmbedData?.thumbnailUrl || null,
+                    embedHtml:    _instaEmbedData?.embedHtml    || null,
+                    title:        _instaEmbedData?.title        || null,
                 };
             }
 
@@ -721,15 +676,31 @@ const storiesManager = (() => {
 
                     <!-- Content -->
                     <div class="story-content" id="storyContent">
-                        ${story.type === 'image'
+                        ${story.type === 'instagram'
+                            ? `<div class="story-insta-embed" id="storyInstaEmbed">
+                                   ${story.embedHtml
+                                       ? story.embedHtml
+                                       : story.thumbnailUrl
+                                           ? `<div class="story-insta-thumb-wrap">
+                                                  <img src="${escapeAttribute(story.thumbnailUrl)}" class="story-insta-thumb-img" alt="Instagram">
+                                                  <a href="${escapeAttribute(story.instaURL)}" target="_blank" rel="noopener" class="story-insta-play-btn">
+                                                      <span class="story-insta-play-icon">▶</span>
+                                                  </a>
+                                              </div>`
+                                           : `<div class="story-insta-no-thumb">
+                                                  <a href="${escapeAttribute(story.instaURL)}" target="_blank" rel="noopener" class="story-insta-open-btn">
+                                                      📱 Instagram లో చూడు
+                                                  </a>
+                                              </div>`
+                                   }
+                               </div>`
+                            : story.type === 'image'
                             ? `<img class="story-content-image"
                                     src="${escapeAttribute(story.imageURL)}"
                                     alt="Status"
                                     onerror="this.style.display='none';document.getElementById('storyMediaFallback').style.display='flex';">
                                <div id="storyMediaFallback" class="story-media-fallback" style="display:none;">
                                    <span>🖼️ Image couldn't load</span>
-                                   <a href="${escapeAttribute(story.imageURL)}" target="_blank" rel="noopener"
-                                      style="color:#60a5fa;margin-top:8px;font-size:13px;">Open in Drive ↗</a>
                                </div>`
                             : story.type === 'video'
                                 ? `<video class="story-content-video"
@@ -739,9 +710,7 @@ const storiesManager = (() => {
                                           onerror="this.style.display='none';document.getElementById('storyMediaFallback').style.display='flex'">
                                    </video>
                                    <div id="storyMediaFallback" class="story-media-fallback" style="display:none;text-align:center;padding:20px;color:#fff;">
-                                       <span>🎬 Video could not load directly</span>
-                                       <a href="${escapeAttribute(story.imageURL)}" target="_blank" rel="noopener"
-                                          style="display:block;color:#60a5fa;margin-top:8px;font-size:13px;">Open in Drive ↗</a>
+                                       <span>🎬 Video load కాలేదు</span>
                                    </div>`
                                 : `<div class="story-content-text">${escapeHTML(story.text)}</div>`}
                     </div>
@@ -759,6 +728,20 @@ const storiesManager = (() => {
                 const fill = document.getElementById(`storyFill_${idx}`);
                 if (fill) fill.classList.add('active');
             }, 50);
+
+            // Load Instagram embed script if needed
+            if (story.type === 'instagram' && story.embedHtml) {
+                if (window.instgrm) {
+                    window.instgrm.Embeds.process();
+                } else if (!document.getElementById('instagram-embed-script')) {
+                    const s = document.createElement('script');
+                    s.id = 'instagram-embed-script';
+                    s.src = 'https://www.instagram.com/embed.js';
+                    s.async = true;
+                    s.onload = () => window.instgrm?.Embeds.process();
+                    document.body.appendChild(s);
+                }
+            }
 
             // Auto-advance
             timer = setTimeout(() => {
