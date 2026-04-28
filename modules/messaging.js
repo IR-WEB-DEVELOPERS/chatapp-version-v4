@@ -86,6 +86,7 @@ function renderVoiceMessage(msg) {
 }
 
 function buildMessageHTML(msg, isSent, isGroup) {
+    const I          = window.Icons;
     const rawTime    = msg.time || msg.timestamp || Date.now();
     const time       = rawTime?.toDate ? rawTime.toDate() : new Date(rawTime);
     const timeString = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -128,7 +129,6 @@ function buildMessageHTML(msg, isSent, isGroup) {
         bodyHtml = `<div class="message-text">${escapeHTML(msg.text || '').replace(/\n/g, '<br>')}</div>`;
     }
 
-    const I           = window.Icons;
     const pinnedBadge = msg.pinned
         ? `<span class="pinned-badge">${I ? I.get('pinFill', 12) : ''}</span>`
         : '';
