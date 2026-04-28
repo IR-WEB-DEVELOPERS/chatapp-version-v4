@@ -2167,15 +2167,10 @@ body {
         padding: 12px 12px 8px;
     }
 
-    /* ── Message input: always visible, above keyboard ── */
+    /* ── Message input ── */
     .message-input {
         padding: 10px 12px;
-        /* iOS safe area bottom padding */
         padding-bottom: max(10px, env(safe-area-inset-bottom));
-        position: sticky;
-        bottom: 0;
-        z-index: 50;
-        background: var(--sidebar-bg);
     }
 
     /* ── Sidebar header compact ── */
@@ -2372,39 +2367,34 @@ body {
         overflow: hidden;
     }
 
-    /* chat-container must fill remaining space but NOT overflow */
+    /* chat-container: overflow visible so flex children (input bar) stay visible */
     .chat-container {
         flex: 1;
-        min-height: 0;  /* critical: allows flex children to shrink */
+        -webkit-flex: 1;
+        min-height: 0;
         height: 100%;
         display: flex;
         flex-direction: column;
-        overflow: hidden;
+        overflow: visible;
     }
 
-    /* Messages area scrolls, takes remaining space */
+    /* Messages area scrolls */
     .chat-messages {
         flex: 1;
-        min-height: 0;  /* critical */
+        min-height: 0;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
     }
 
-    /* Input bar always sticks to bottom */
+    /* Input bar: flex child, always rendered at bottom */
     .message-input {
         flex-shrink: 0;
         width: 100%;
         padding: 10px 12px;
         padding-bottom: max(10px, env(safe-area-inset-bottom));
-        /* Prevent iOS keyboard from hiding it */
         position: relative;
-        z-index: 10;
-    }
-
-    /* When keyboard opens on iOS, dvh handles it automatically */
-    /* For older iOS fallback */
-    .chat-container {
-        -webkit-flex: 1;
+        z-index: 50;
+        background: var(--sidebar-bg);
     }
 }
 
