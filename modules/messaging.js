@@ -119,6 +119,42 @@ function buildMessageHTML(msg, isSent, isGroup) {
         `, dateLabel };
     }
 
+    // ── One Time View message ────────────────────────────────
+    if (msg.oneTimeView && !isSent) {
+        if (msg.oneTimeViewOpened) {
+            // Already opened by receiver — show "vanished" placeholder
+            return { html: `
+                <div class="message received deleted-msg otv-expired">
+                    <div class="message-text deleted-text"><span class="otv-icon">👁</span> One-time message expired</div>
+                    <div class="message-time">${timeString}</div>
+                </div>
+            `, dateLabel };
+        }
+        // Not yet opened — show locked bubble with tap-to-view
+        return { html: `
+            <div class="message received otv-locked" data-id="${escapeAttribute(msg.id || '')}" data-chattype="${isGroup ? 'group' : 'direct'}">
+                <div class="otv-bubble" onclick="openOneTimeViewMessage('${escapeAttribute(msg.id || '')}', '${isGroup ? 'group' : 'direct'}')">
+                    <span class="otv-eye-icon">👁</span>
+                    <span class="otv-label">Tap to view · <em>disappears after opening</em></span>
+                </div>
+                <div class="message-time">${timeString}</div>
+            </div>
+        `, dateLabel };
+    }
+    if (msg.oneTimeView && isSent) {
+        // Sender sees status of their OTV message
+        const status = msg.oneTimeViewOpened ? 'Viewed once · deleted' : 'One-time view · waiting';
+        return { html: `
+            <div class="message sent otv-sent">
+                <div class="otv-sent-bubble">
+                    <span class="otv-eye-icon">👁</span>
+                    <span class="otv-sent-text">${escapeHTML(msg.text)}</span>
+                </div>
+                <div class="message-time otv-status-label">${status} · ${timeString}</div>
+            </div>
+        `, dateLabel };
+    }
+
     if (msg.deletedFor && msg.deletedFor.includes(currentUser.uid)) {
         return { html: '', dateLabel };
     }
@@ -580,12 +616,23 @@ async function sendMessage() {
             seenBy: []
         };
         if (replyingTo) msgData.replyTo = replyingTo;
+        // One Time View flag — set by toggle button
+        if (window._oneTimeViewEnabled) {
+            msgData.oneTimeView = true;
+            msgData.oneTimeViewOpened = false;
+        }
 
         await db.collection('messages').add(msgData);
         input.value = '';
         input.style.height = 'auto';
         cancelReply('directReplyBar');
         clearTypingIndicator();
+        // Reset one-time view toggle after each send
+        if (window._oneTimeViewEnabled) {
+            window._oneTimeViewEnabled = false;
+            const btn = document.getElementById('otvBtn');
+            if (btn) { btn.classList.remove('otv-active'); btn.title = 'One-time view'; }
+        }
 
         await db.collection('users').doc(chatWithUID).update({
             [`unreadCounts.${chatId}`]: firebase.firestore.FieldValue.increment(1)
@@ -632,11 +679,22 @@ async function sendGroupMessage() {
             seenBy:     []
         };
         if (replyingTo) msgData.replyTo = replyingTo;
+        // One Time View flag
+        if (window._oneTimeViewEnabled) {
+            msgData.oneTimeView = true;
+            msgData.oneTimeViewOpened = false;
+        }
 
         await db.collection('groupMessages').add(msgData);
         input.value = '';
         input.style.height = 'auto';
         cancelReply('groupReplyBar');
+        // Reset one-time view toggle after each send
+        if (window._oneTimeViewEnabled) {
+            window._oneTimeViewEnabled = false;
+            const btn = document.getElementById('otvGroupBtn');
+            if (btn) { btn.classList.remove('otv-active'); btn.title = 'One-time view'; }
+        }
 
         // Push notification to all group members (except sender)
         if (window.pushNotifications) {
@@ -1330,6 +1388,72 @@ window.sendGroupMessage      = sendGroupMessage;
 window.setReply              = setReply;
 window.cancelReply           = cancelReply;
 window.showDeleteMenu        = showDeleteMenu;
+// ── One Time View — open & delete ───────────────────────────
+async function openOneTimeViewMessage(msgId, chatType) {
+    if (!msgId || !currentUser) return;
+    const collection = chatType === 'group' ? 'groupMessages' : 'messages';
+    try {
+        // 1. Mark as opened immediately so UI updates
+        await db.collection(collection).doc(msgId).update({ oneTimeViewOpened: true });
+
+        // 2. Fetch the message to show text in a modal overlay
+        const snap = await db.collection(collection).doc(msgId).get();
+        const data = snap.data();
+        if (!data) return;
+
+        // Show fullscreen overlay with countdown
+        const overlay = document.createElement('div');
+        overlay.className = 'otv-overlay';
+        overlay.innerHTML = `
+            <div class="otv-modal">
+                <div class="otv-modal-header"><span class="otv-eye-icon" style="font-size:28px">👁</span> One-Time Message</div>
+                <div class="otv-modal-body">${escapeHTML(data.text || '')}</div>
+                <div class="otv-modal-footer">
+                    <span class="otv-countdown" id="otvCountdown">Deletes in 5s…</span>
+                    <button class="otv-close-btn" onclick="this.closest('.otv-overlay').dispatchEvent(new Event('otvclose'))">Close now</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        // Countdown timer
+        let secs = 5;
+        const countEl = overlay.querySelector('#otvCountdown');
+        const timer = setInterval(() => {
+            secs--;
+            if (countEl) countEl.textContent = secs > 0 ? `Deletes in ${secs}s…` : 'Deleted!';
+            if (secs <= 0) {
+                clearInterval(timer);
+                overlay.remove();
+                // 3. Hard delete (deletedForAll) after viewing
+                db.collection(collection).doc(msgId).update({ deletedForAll: true })
+                    .catch(e => console.error('OTV delete error:', e));
+            }
+        }, 1000);
+
+        overlay.addEventListener('otvclose', () => {
+            clearInterval(timer);
+            overlay.remove();
+            db.collection(collection).doc(msgId).update({ deletedForAll: true })
+                .catch(e => console.error('OTV delete error:', e));
+        });
+    } catch (e) {
+        console.error('OTV open error:', e);
+    }
+}
+
+// ── One Time View toggle state ───────────────────────────────
+window._oneTimeViewEnabled = false;
+function toggleOneTimeView(btn) {
+    window._oneTimeViewEnabled = !window._oneTimeViewEnabled;
+    if (btn) {
+        btn.classList.toggle('otv-active', window._oneTimeViewEnabled);
+        btn.title = window._oneTimeViewEnabled ? 'One-time view ON — click to turn off' : 'One-time view';
+    }
+}
+
+window.openOneTimeViewMessage = openOneTimeViewMessage;
+window.toggleOneTimeView      = toggleOneTimeView;
 window.showForwardModal      = showForwardModal;
 window.togglePinMessage      = togglePinMessage;
 window.renderPinnedBanner    = renderPinnedBanner;
