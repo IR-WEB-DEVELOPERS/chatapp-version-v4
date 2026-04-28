@@ -741,6 +741,9 @@ class WebRTCManager {
     // UI Methods
     showCallInterface(isCaller, isVideoCall) {
         this.cleanupCallUI();
+
+        // SVG icon for "add person" — inline so no Icons dependency needed
+        const addPersonSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>`;
         
         const callHTML = `
             <div id="callContainer" class="call-container">
@@ -768,6 +771,7 @@ class WebRTCManager {
                     ${isVideoCall ? `<button class="call-btn mute-video" title="Mute Video">${window.Icons.get('videoFill', 24)}</button>` : ''}
                     ${isVideoCall && !this.isMobileDevice() ? `<button class="call-btn screen-share" title="Share Screen">${window.Icons.get('monitor', 24)}</button>` : ''}
                     ${isVideoCall ? `<button class="call-btn switch-camera" title="Switch Camera">${window.Icons.get('switchCam', 24)}</button>` : ''}
+                    <button class="call-btn add-member" title="Add Member">${addPersonSVG}</button>
                     <button class="call-btn end-call" title="End Call">${window.Icons.get('phoneEnd', 24)}</button>
                 </div>
             </div>
@@ -1181,6 +1185,13 @@ class WebRTCManager {
                 this.endCall();
             });
         }
+
+        const addMemberBtn = document.querySelector('.add-member');
+        if (addMemberBtn) {
+            addMemberBtn.addEventListener('click', () => {
+                this.showAddMemberPicker();
+            });
+        }
     }
 
     sendCallMetadata() {
@@ -1201,6 +1212,166 @@ class WebRTCManager {
             console.error('Error parsing data channel message:', error);
         }
     }
-}
+
+    // ──────────────────────────────────────────────────────────
+    //  Add Member: Show friend picker bottom sheet
+    // ──────────────────────────────────────────────────────────
+    showAddMemberPicker() {
+        // Remove any existing picker
+        document.getElementById('addMemberOverlay')?.remove();
+
+        const friends = window.currentUserData?.friends || [];
+        // Exclude the person already in the call
+        const candidates = friends.filter(uid => uid !== this.callTarget);
+
+        // Already-invited set (persists while picker is open)
+        const invited = new Set();
+
+        const overlay = document.createElement('div');
+        overlay.className = 'add-member-overlay';
+        overlay.id = 'addMemberOverlay';
+
+        const renderList = (filter = '') => {
+            const lower = filter.toLowerCase();
+            const filtered = candidates.filter(uid => {
+                const d = window.enhancedCache?.get(`user_${uid}`);
+                if (!d) return false;
+                return !filter || (d.name || '').toLowerCase().includes(lower);
+            });
+
+            if (filtered.length === 0) {
+                return `<div class="add-member-empty">${filter ? 'No friends match your search' : 'No other friends to add'}</div>`;
+            }
+
+            return filtered.map(uid => {
+                const d = window.enhancedCache?.get(`user_${uid}`) || {};
+                const initial = (d.name || 'U').charAt(0).toUpperCase();
+                const avatarInner = d.photoURL
+                    ? `<img src="${d.photoURL}" alt="${initial}" onerror="this.style.display='none';this.parentNode.textContent='${initial}'">`
+                    : initial;
+                const isInvited = invited.has(uid);
+                return `
+                    <button class="am-friend-item" data-uid="${uid}" ${isInvited ? 'disabled' : ''}>
+                        <div class="am-avatar">${avatarInner}</div>
+                        <div class="am-info">
+                            <div class="am-name">${(d.name || 'User').replace(/</g, '&lt;')}</div>
+                            <div class="am-status">${d.status === 'online' ? '🟢 Online' : '⚫ Offline'}</div>
+                        </div>
+                        <span class="${isInvited ? 'am-invited-badge' : 'am-invite-badge'}">${isInvited ? 'Invited' : 'Invite'}</span>
+                    </button>`;
+            }).join('');
+        };
+
+        overlay.innerHTML = `
+            <div class="add-member-sheet">
+                <div class="add-member-header">
+                    <h3>Add to Call</h3>
+                    <button class="add-member-close" id="amCloseBtn">✕</button>
+                </div>
+                <div class="add-member-search">
+                    <input type="text" id="amSearch" placeholder="Search friends…" autocomplete="off">
+                </div>
+                <div class="add-member-list" id="amList">
+                    ${renderList()}
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        // Close on backdrop click
+        overlay.addEventListener('click', e => {
+            if (e.target === overlay) overlay.remove();
+        });
+        document.getElementById('amCloseBtn').addEventListener('click', () => overlay.remove());
+
+        // Search filter
+        document.getElementById('amSearch').addEventListener('input', e => {
+            document.getElementById('amList').innerHTML = renderList(e.target.value);
+            this._bindAmItems(overlay, invited, renderList);
+        });
+
+        this._bindAmItems(overlay, invited, renderList);
+    }
+
+    _bindAmItems(overlay, invited, renderList) {
+        overlay.querySelectorAll('.am-friend-item:not([disabled])').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const uid = btn.dataset.uid;
+                if (invited.has(uid)) return;
+                invited.add(uid);
+
+                // Re-render to show "Invited" badge
+                document.getElementById('amList').innerHTML = renderList(
+                    document.getElementById('amSearch')?.value || ''
+                );
+                this._bindAmItems(overlay, invited, renderList);
+
+                await this.upgradeToGroupCall(uid);
+            });
+        });
+    }
+
+    // ──────────────────────────────────────────────────────────
+    //  Upgrade 1-1 call → group call mesh
+    //
+    //  Flow:
+    //  1. Create a groupCalls room keyed on a sorted uid pair
+    //  2. Current call's two participants join the room
+    //  3. Send a Firestore invite to the new member
+    //  4. End the 1-1 peer connection (GroupCallManager handles its own)
+    //  5. GroupCallManager takes over the UI
+    // ──────────────────────────────────────────────────────────
+    async upgradeToGroupCall(newMemberUID) {
+        if (!window.GroupCallManager) {
+            window.showToast?.('Group call system not available', 'error');
+            return;
+        }
+
+        const myUID     = window.currentUser?.uid;
+        const otherUID  = this.callTarget;
+        const isVideo   = this.isVideoCall;
+
+        // Deterministic room id from the original two participants
+        const roomId = 'room_' + [myUID, otherUID].sort().join('_');
+
+        console.log('🔄 Upgrading 1-1 call to group call, room:', roomId);
+        window.showToast?.('Adding member…', 'info');
+
+        try {
+            // 1. Send invite to the new member BEFORE ending 1-1 call
+            const invited = await window.GroupCallManager.inviteToRoom(newMemberUID, roomId, isVideo);
+            if (!invited) throw new Error('Could not send invite');
+
+            // 2. End the 1-1 signaling cleanly (don't show "call ended" to other peer yet)
+            //    We keep localStream alive — GroupCallManager will acquire its own stream,
+            //    so stop ours now to avoid double-camera-use on mobile.
+            if (this.localStream) {
+                this.localStream.getTracks().forEach(t => t.stop());
+            }
+            if (this.peerConnection) {
+                try { this.peerConnection.close(); } catch(_) {}
+            }
+            // Signal the other side that 1-1 is ending (they will also see the group invite)
+            if (this.currentCallId && window.signalingManager) {
+                window.signalingManager.sendCallEnd(this.currentCallId).catch(() => {});
+            }
+
+            // 3. Clean up 1-1 UI (NOT full cleanup — let GroupCallManager build its own)
+            const cc = document.getElementById('callContainer');
+            if (cc) cc.remove();
+            document.getElementById('addMemberOverlay')?.remove();
+
+            // 4. Reset 1-1 state
+            this.cleanup();
+
+            // 5. Start group call — this peer becomes the first participant
+            await window.GroupCallManager.startCall(roomId, isVideo);
+
+        } catch (err) {
+            console.error('❌ Upgrade to group call failed:', err);
+            window.showToast?.('Could not add member: ' + err.message, 'error');
+        }
+    }
 
 window.webRTCManager = new WebRTCManager();
