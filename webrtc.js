@@ -239,7 +239,23 @@ class WebRTCManager {
             await window.signalingManager.sendAnswer(callId, answer);
             console.log('✅ Answer sent via signaling');
 
-            // Process any pending ICE candidates
+            // FIX: Fetch fresh callerCandidates from Firestore and add them now
+            // that remoteDescription is set. The queue (pendingICECandidates) may have
+            // already received them, but Firestore is the source of truth.
+            try {
+                const callDoc = await window.signalingManager.callCollection.doc(callId).get();
+                if (callDoc.exists) {
+                    const freshData = callDoc.data();
+                    if (freshData.callerCandidates && freshData.callerCandidates.length > 0) {
+                        console.log('📥 Fetching', freshData.callerCandidates.length, 'callerCandidates from Firestore after accept');
+                        window.signalingManager.handleICECandidates(callId, freshData.callerCandidates);
+                    }
+                }
+            } catch (e) {
+                console.warn('Could not fetch fresh callerCandidates:', e);
+            }
+
+            // Process any pending ICE candidates that arrived before remote desc was set
             await this.processPendingICECandidates();
 
             // Show call interface
