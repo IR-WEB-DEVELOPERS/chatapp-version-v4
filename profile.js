@@ -589,10 +589,12 @@ const storiesManager = (() => {
             body: JSON.stringify({ role: 'reader', type: 'anyone' }),
         });
 
-        // Always use direct download URL so <img> and <video> tags can load it.
-        // webViewLink is an HTML page — not embeddable. webContentLink forces
-        // a file-download prompt. uc?export=download works for both images and videos.
-        const viewLink = `https://drive.google.com/uc?export=download&id=${fileData.id}`;
+        // Use thumbnail URL for images (embeddable in <img> tags, no CORS/auth issues).
+        // For videos, fall back to uc?export=download (best available without Firebase Storage).
+        const isImage = file.type.startsWith('image/');
+        const viewLink = isImage
+            ? `https://drive.google.com/thumbnail?id=${fileData.id}&sz=w800`
+            : `https://drive.google.com/uc?export=download&id=${fileData.id}`;
 
         return { viewLink, fileId: fileData.id };
     }
