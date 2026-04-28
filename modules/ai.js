@@ -296,30 +296,47 @@ user is speaking (Telugu, Hindi, English, etc.).`;
     // ── Hook into _renderFriendsList so AI is always re-injected ──
     function hookRenderFriendsList() {
         const original = window._renderFriendsList;
-        if (!original) return false;
-        window._renderFriendsList = function () {
+        if (!original || original.__aiHooked) return false;
+        const hooked = function () {
             original.apply(this, arguments);
-            injectAIIntoFriendsList();
+            setTimeout(injectAIIntoFriendsList, 50);
         };
+        hooked.__aiHooked = true;
+        window._renderFriendsList = hooked;
         return true;
     }
 
-    // ── Init: poll until friends module is ready, then hook ──
-    function init() {
-        if (hookRenderFriendsList()) {
-            injectAIIntoFriendsList();
-            return;
-        }
-        const poll = setInterval(() => {
-            if (hookRenderFriendsList()) {
-                clearInterval(poll);
+    // ── MutationObserver fallback ─────────────────────────────
+    function watchWithObserver() {
+        const friendsList = document.getElementById('friendsList');
+        if (!friendsList) return false;
+        const obs = new MutationObserver(() => {
+            if (!friendsList.querySelector('[data-ai-uid]')) {
                 injectAIIntoFriendsList();
             }
-        }, 300);
+        });
+        obs.observe(friendsList, { childList: true });
+        return true;
     }
 
-    // Always wait a tick so all modules load first
-    setTimeout(init, 500);
+    // ── Init ──────────────────────────────────────────────────
+    function init() {
+        hookRenderFriendsList();
+        watchWithObserver();
+        // Inject immediately if list already has items
+        injectAIIntoFriendsList();
+
+        // Keep retrying for a few seconds in case list renders late
+        let tries = 0;
+        const retry = setInterval(() => {
+            hookRenderFriendsList();
+            watchWithObserver();
+            injectAIIntoFriendsList();
+            if (++tries >= 20) clearInterval(retry);
+        }, 500);
+    }
+
+    setTimeout(init, 800);
 
     // Expose for debug
     window.aiAssistant = { openAIChat, clearHistory: () => { localStorage.removeItem(STORAGE_KEY); renderHistory(); } };
