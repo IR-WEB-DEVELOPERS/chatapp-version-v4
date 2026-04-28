@@ -29,28 +29,43 @@ class WebRTCManager {
         // FIX: Added free public TURN servers. For production, use your own TURN (e.g., Metered, Twilio, Coturn).
         this.iceServers = {
             iceServers: [
+                // Google STUN
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
                 { urls: 'stun:stun2.l.google.com:19302' },
-                // Free TURN servers (Metered — rate limited but good for testing)
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' },
+                // Cloudflare STUN
+                { urls: 'stun:stun.cloudflare.com:3478' },
+                // Open Relay TURN — multiple endpoints for reliability
                 {
-                    urls: 'turn:a.relay.metered.ca:80',
+                    urls: [
+                        'turn:openrelay.metered.ca:80',
+                        'turn:openrelay.metered.ca:443',
+                        'turn:openrelay.metered.ca:443?transport=tcp',
+                        'turns:openrelay.metered.ca:443'
+                    ],
                     username: 'openrelayproject',
                     credential: 'openrelayproject'
                 },
+                // Numb TURN (backup)
                 {
-                    urls: 'turn:a.relay.metered.ca:443',
-                    username: 'openrelayproject',
-                    credential: 'openrelayproject'
+                    urls: 'turn:numb.viagenie.ca',
+                    username: 'webrtc@live.com',
+                    credential: 'muazkh'
                 },
+                // FreeTURN (backup)
                 {
-                    urls: 'turn:a.relay.metered.ca:443?transport=tcp',
-                    username: 'openrelayproject',
-                    credential: 'openrelayproject'
+                    urls: [
+                        'turn:freestun.net:3478',
+                        'turns:freestun.net:5349'
+                    ],
+                    username: 'free',
+                    credential: 'free'
                 }
             ],
-            iceCandidatePoolSize: 10,
-            iceTransportPolicy: 'all'  // 'relay' గా మారిస్తే force TURN — debugging కి useful
+            iceCandidatePoolSize: 15,
+            iceTransportPolicy: 'all'
         };
         
         this.mediaConstraints = {
@@ -85,6 +100,22 @@ class WebRTCManager {
         });
     }
 
+    // Fetch fresh TURN credentials from server (time-limited, more reliable)
+    async fetchIceServers() {
+        try {
+            const res = await fetch('/ice-servers', { method: 'GET' });
+            if (res.ok) {
+                const data = await res.json();
+                if (data.iceServers?.length) {
+                    console.log('✅ Got fresh ICE servers from server');
+                    this.iceServers.iceServers = data.iceServers;
+                }
+            }
+        } catch (e) {
+            console.warn('⚠️ Could not fetch ICE servers — using defaults:', e.message);
+        }
+    }
+
     async startCall(targetUID, isVideoCall = true) {
         try {
             console.log(`🚀 Starting ${isVideoCall ? 'video' : 'voice'} call to:`, targetUID);
@@ -96,6 +127,9 @@ class WebRTCManager {
             if (!window.signalingManager) {
                 throw new Error('Signaling system not ready');
             }
+            
+            // Fetch fresh ICE servers before starting call
+            await this.fetchIceServers();
 
             this.callTarget = targetUID;
             this.isCaller = true;
@@ -191,6 +225,9 @@ class WebRTCManager {
             this.pendingICECandidates = [];
             this._pendingRemoteTracks = [];
             this.signalingState = 'have-remote-offer';
+
+            // Fetch fresh ICE servers before accepting
+            await this.fetchIceServers();
 
             // Get user media
             try {
@@ -357,10 +394,42 @@ class WebRTCManager {
                 }
             };
 
-            // ICE connection state
+            // ICE connection state — with auto restart on failure
             this.peerConnection.oniceconnectionstatechange = () => {
                 if (!this.peerConnection) return;
-                console.log('🧊 ICE connection state:', this.peerConnection.iceConnectionState);
+                const state = this.peerConnection.iceConnectionState;
+                console.log('🧊 ICE connection state:', state);
+
+                if (state === 'failed') {
+                    console.warn('⚠️ ICE failed — attempting ICE restart...');
+                    // ICE restart: re-negotiate with new candidates
+                    this.peerConnection.restartIce();
+                    // If still failed after 6s, end call
+                    if (this._iceRestartTimer) clearTimeout(this._iceRestartTimer);
+                    this._iceRestartTimer = setTimeout(() => {
+                        if (this.peerConnection?.iceConnectionState === 'failed') {
+                            console.error('❌ ICE restart failed — ending call');
+                            this.handleCallError('Connection failed. Please try again.');
+                        }
+                    }, 6000);
+                }
+
+                if (state === 'disconnected') {
+                    // Temporary disconnect — wait 4s before giving up
+                    if (this._iceDisconnectTimer) clearTimeout(this._iceDisconnectTimer);
+                    this._iceDisconnectTimer = setTimeout(() => {
+                        if (this.peerConnection?.iceConnectionState === 'disconnected') {
+                            console.warn('⚠️ ICE still disconnected — restarting ICE...');
+                            this.peerConnection.restartIce();
+                        }
+                    }, 4000);
+                }
+
+                if (state === 'connected' || state === 'completed') {
+                    // Clear any pending timers
+                    if (this._iceRestartTimer)    clearTimeout(this._iceRestartTimer);
+                    if (this._iceDisconnectTimer) clearTimeout(this._iceDisconnectTimer);
+                }
             };
 
         } catch (error) {
