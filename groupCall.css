@@ -1,0 +1,202 @@
+/* ============================================================
+   groupCall.css — Group Video/Voice Conference UI
+   ============================================================ */
+
+/* ── Overlay (full screen) ──────────────────────────────────── */
+.gc-overlay {
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    color: white;
+    overflow: hidden;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* ── Header ─────────────────────────────────────────────────── */
+.gc-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px 10px;
+    flex-shrink: 0;
+}
+
+.gc-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #e2e8f0;
+    letter-spacing: 0.01em;
+}
+
+.gc-timer {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #48bb78;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Video Grid ─────────────────────────────────────────────── */
+.gc-grid {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    gap: 6px;
+    padding: 6px;
+    align-items: stretch;
+    box-sizing: border-box;
+}
+
+.gc-grid-1  { grid-template-columns: 1fr; }
+.gc-grid-2  { grid-template-columns: 1fr 1fr; }
+.gc-grid-4  { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.gc-grid-many { grid-template-columns: repeat(3, 1fr); }
+
+/* ── Individual Tile ─────────────────────────────────────────── */
+.gc-tile {
+    position: relative;
+    background: #2d3748;
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100px;
+}
+
+.gc-tile-local {
+    border: 2px solid #4299e1;
+}
+
+.gc-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transform: scaleX(-1); /* mirror front camera */
+}
+
+/* ── Avatar placeholder (audio-only / video off) ─────────────── */
+.gc-avatar-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #2d3748;
+}
+
+.gc-initials {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: #4299e1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: white;
+}
+
+/* ── Tile labels ─────────────────────────────────────────────── */
+.gc-tile-name {
+    position: absolute;
+    bottom: 8px;
+    left: 10px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 999px;
+    backdrop-filter: blur(4px);
+    max-width: 80%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gc-tile-mute-icon {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(229,62,62,0.85);
+    border-radius: 50%;
+    width: 26px;
+    height: 26px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+
+.gc-tile-mute-icon svg {
+    width: 14px;
+    height: 14px;
+    color: white;
+}
+
+/* ── Controls bar ────────────────────────────────────────────── */
+.gc-controls {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 14px 20px;
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+    background: rgba(0,0,0,0.35);
+}
+
+.gc-btn {
+    width: 58px;
+    height: 58px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #4a5568;
+    color: white;
+    transition: transform 0.2s, background 0.2s;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.3);
+}
+
+.gc-btn:hover  { transform: scale(1.08); }
+.gc-btn:active { transform: scale(0.94); }
+
+.gc-btn svg { width: 24px; height: 24px; }
+
+.gc-btn-mute  { background: #4a5568; }
+.gc-btn-video { background: #4a5568; }
+.gc-btn-cam   { background: #4a5568; }
+.gc-btn-end   { background: #e53e3e; }
+
+/* Active = muted / video-off state */
+.gc-btn-active { background: #e53e3e !important; }
+
+.gc-btn-end:hover { background: #c53030; }
+
+/* ── Mobile adjustments ──────────────────────────────────────── */
+@media (max-width: 599px) {
+    .gc-header { padding: 10px 14px 6px; }
+    .gc-title  { font-size: 0.9rem; }
+    .gc-timer  { font-size: 0.85rem; }
+
+    .gc-btn {
+        width: 52px;
+        height: 52px;
+    }
+
+    .gc-btn svg { width: 22px; height: 22px; }
+
+    .gc-controls { gap: 12px; padding: 10px 12px; }
+
+    .gc-initials { width: 56px; height: 56px; font-size: 1.4rem; }
+
+    /* On narrow screens, 3-col → 2-col */
+    .gc-grid-many { grid-template-columns: 1fr 1fr; }
+}
