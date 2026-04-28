@@ -1373,5 +1373,6 @@ class WebRTCManager {
             window.showToast?.('Could not add member: ' + err.message, 'error');
         }
     }
+}
 
 window.webRTCManager = new WebRTCManager();
