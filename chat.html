@@ -600,12 +600,29 @@
             });
         }
     </script>
-    <!-- FIX: Call notification tap చేసి browser open అయినప్పుడు — URL params check -->
-    <script>
+    <!-- FIX: Call notification tap చేసి browser open అయినప్పుడు — URL params check -->\n    <script>
         window.addEventListener('appInitialized', () => {
             const params = new URLSearchParams(window.location.search);
             const callType = params.get('callType');
             const declineCallId = params.get('declineCall');
+
+            // ── Instagram share_target handler ──────────────────
+            // When user shares an Instagram link via PWA share sheet,
+            // manifest share_target sends it here as ?shareText=<url>
+            const shareText = params.get('shareText') || '';
+            if (shareText && /instagram\.com\/(p|reel|tv)\/[\w-]+/.test(shareText)) {
+                history.replaceState({}, '', '/chat.html');
+                // Wait for storiesManager to be ready, then open composer with prefilled URL
+                const tryOpen = () => {
+                    if (window.storiesManager) {
+                        window.storiesManager.openComposer(shareText);
+                    } else {
+                        setTimeout(tryOpen, 300);
+                    }
+                };
+                tryOpen();
+                return;
+            }
 
             if (declineCallId) {
                 // FIX: Notification లో Decline button → background లో open అయి decline చేయాలి
