@@ -8,6 +8,7 @@ const profileManager = (() => {
     // ── State ─────────────────────────────────────────────────
     let _overlay = null;
     let _newAvatarURL = null;
+    let _newAvatarBase64 = null; // compressed base64 for Firestore storage
 
     // ── Open Profile Modal ────────────────────────────────────
     function open() {
@@ -37,8 +38,9 @@ const profileManager = (() => {
                              style="${(auth.photoURL || user.photoURL) ? 'display:none;' : ''}">
                             👤
                         </div>
-                        <button class="profile-avatar-edit-btn" id="profileAvatarEditBtn" title="Change avatar">📷</button>
+                        <button class="profile-avatar-edit-btn" id="profileAvatarEditBtn" title="Change photo">📷</button>
                     </div>
+                    <input type="file" id="avatarFileInput" accept="image/*" style="display:none;">
                 </div>
 
                 <div class="profile-body">
@@ -46,18 +48,6 @@ const profileManager = (() => {
                         <h2 id="profileDisplayName">${escapeHTML(user.name || auth.displayName || 'User')}</h2>
                     </div>
                     <div class="profile-username-tag">@${escapeHTML(user.username || '')}</div>
-
-                    <!-- Avatar URL input (hidden by default) -->
-                    <div class="avatar-url-section" id="avatarUrlSection" style="display:none;">
-                        <p>Paste an image URL for your avatar:</p>
-                        <div class="profile-field">
-                            <div class="profile-field-wrap">
-                                <input type="url" class="profile-input" id="avatarUrlInput"
-                                    placeholder="https://example.com/avatar.jpg"
-                                    value="${escapeAttribute(auth.photoURL || user.photoURL || '')}">
-                            </div>
-                        </div>
-                    </div>
 
                     <hr class="profile-divider">
 
@@ -107,6 +97,7 @@ const profileManager = (() => {
             _overlay.remove();
             _overlay = null;
             _newAvatarURL = null;
+            _newAvatarBase64 = null;
         }
     }
 
@@ -115,33 +106,56 @@ const profileManager = (() => {
         document.getElementById('profileCloseBtn').onclick = close;
         _overlay.onclick = (e) => { if (e.target === _overlay) close(); };
 
-        // Avatar edit toggle
+        // Avatar edit — trigger file picker
         document.getElementById('profileAvatarEditBtn').onclick = () => {
-            const section = document.getElementById('avatarUrlSection');
-            section.style.display = section.style.display === 'none' ? 'block' : 'none';
+            document.getElementById('avatarFileInput').click();
         };
 
-        // Avatar URL live preview
-        document.getElementById('avatarUrlInput').oninput = (e) => {
-            const url = e.target.value.trim();
-            _newAvatarURL = url || null;
-            const img = document.getElementById('profileAvatarImg');
-            const fallback = document.getElementById('profileAvatarFallback');
-            if (url) {
-                if (!img) {
-                    const newImg = document.createElement('img');
-                    newImg.className = 'profile-avatar-img';
-                    newImg.id = 'profileAvatarImg';
-                    newImg.onerror = () => { newImg.style.display = 'none'; fallback.style.display = 'flex'; };
-                    document.getElementById('profileAvatarRing').prepend(newImg);
-                    newImg.src = url;
-                    fallback.style.display = 'none';
-                } else {
-                    img.src = url;
+        // File selected — compress with canvas and preview
+        document.getElementById('avatarFileInput').onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            if (!file.type.startsWith('image/')) {
+                showToast('Image file మాత్రమే select చేయండి', 'error');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const original = new Image();
+                original.onload = () => {
+                    // Compress: resize to 200x200, JPEG quality 0.7
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 200;
+                    canvas.height = 200;
+                    const ctx = canvas.getContext('2d');
+
+                    // Crop square from center
+                    const size = Math.min(original.width, original.height);
+                    const sx = (original.width - size) / 2;
+                    const sy = (original.height - size) / 2;
+                    ctx.drawImage(original, sx, sy, size, size, 0, 0, 200, 200);
+
+                    const base64 = canvas.toDataURL('image/jpeg', 0.7);
+                    _newAvatarBase64 = base64;
+
+                    // Live preview
+                    let img = document.getElementById('profileAvatarImg');
+                    const fallback = document.getElementById('profileAvatarFallback');
+                    if (!img) {
+                        img = document.createElement('img');
+                        img.className = 'profile-avatar-img';
+                        img.id = 'profileAvatarImg';
+                        document.getElementById('profileAvatarRing').prepend(img);
+                    }
+                    img.src = base64;
                     img.style.display = 'block';
                     fallback.style.display = 'none';
-                }
-            }
+                };
+                original.src = ev.target.result;
+            };
+            reader.readAsDataURL(file);
         };
 
         // Bio char count
@@ -160,7 +174,6 @@ const profileManager = (() => {
         const btn = document.getElementById('profileSaveBtn');
         const nameVal = document.getElementById('profileNameInput').value.trim();
         const bioVal  = document.getElementById('profileBioInput').value.trim();
-        const avatarURL = _newAvatarURL || document.getElementById('avatarUrlInput').value.trim() || null;
 
         if (!nameVal) {
             showToast('Display name cannot be empty', 'error');
@@ -170,6 +183,11 @@ const profileManager = (() => {
         btn.disabled = true;
         btn.classList.add('saving');
         btn.textContent = 'Saving...';
+
+        // Use new base64 if selected, else keep existing photoURL
+        const avatarURL = _newAvatarBase64
+            ? _newAvatarBase64
+            : (_newAvatarURL || document.getElementById('avatarUrlInput')?.value.trim() || null);
 
         try {
             const updates = {
