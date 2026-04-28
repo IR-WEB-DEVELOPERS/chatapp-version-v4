@@ -3519,3 +3519,21 @@ body {
     background: var(--accent-light);
     color: var(--accent);
 }
+
+/* ── AI Chat Pane ── */
+#aiChatPane {
+    flex: 1;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+#aiMessages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    -webkit-overflow-scrolling: touch;
+}
