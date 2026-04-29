@@ -31,7 +31,14 @@ async function loadUserData() {
             await userRef.set({
                 name:              currentUser.displayName || 'User',
                 email:             currentUser.email || null,
+                // BUG FIX 5: New user documents were created WITHOUT `usernameLower`
+                // and `emailLower` fields. friends.js searchUsers() queries Firestore
+                // using these fields with range operators (>= / <=). Firestore only
+                // returns documents where the queried field EXISTS — so new users
+                // were completely invisible in search until these fields were added.
                 username,
+                usernameLower:     username.toLowerCase(),
+                emailLower:        (currentUser.email || '').toLowerCase(),
                 usernameChangedAt: null,
                 status:            'online',
                 friends:           [],
