@@ -148,38 +148,71 @@ function configureWebPush() {
     return true;
 }
 
-function getMailer() {
-    if (!nodemailer) return null;
-    if (process.env.SMTP_URL) {
-        return nodemailer.createTransport(process.env.SMTP_URL);
-    }
-    if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
-        return null;
-    }
-    return nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: Number(process.env.SMTP_PORT || 587),
-        secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || Number(process.env.SMTP_PORT) === 465,
-        auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS
-        }
-    });
-}
-
+// ── Brevo HTTP API email sender (replaces nodemailer SMTP)
+// Render free tier blocks outbound SMTP ports (465/587).
+// Brevo HTTP API uses HTTPS port 443 — works on all hosting platforms.
 async function sendOtpEmail({ to, code, purpose }) {
-    const mailer = getMailer();
-    if (!mailer) return { sent: false, reason: 'SMTP_NOT_CONFIGURED' };
+    const apiKey = process.env.BREVO_API_KEY;
+    const from   = process.env.SMTP_FROM || 'noreply@example.com';
+
+    if (!apiKey) {
+        console.error('BREVO_API_KEY not set');
+        return { sent: false, reason: 'BREVO_API_KEY_MISSING' };
+    }
 
     const label = purpose === 'privacy-reset' ? 'private chats' : 'login';
-    await mailer.sendMail({
-        from: process.env.SMTP_FROM || process.env.SMTP_USER,
-        to,
-        subject: `EduChat ${label} OTP`,
-        text: `Your EduChat ${label} OTP is ${code}. It expires in 10 minutes.`,
-        html: `<p>Your EduChat ${label} OTP is <strong>${code}</strong>.</p><p>It expires in 10 minutes.</p>`
+
+    const body = JSON.stringify({
+        sender:      { email: from },
+        to:          [{ email: to }],
+        subject:     `EduChat ${label} OTP`,
+        textContent: `Your EduChat ${label} OTP is ${code}. It expires in 10 minutes.`,
+        htmlContent: `
+            <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;border:1px solid #e2e8f0;border-radius:8px;">
+                <h2 style="color:#2d3748;margin-bottom:8px;">EduChat OTP</h2>
+                <p style="color:#4a5568;">Your ${label} verification code is:</p>
+                <div style="font-size:2rem;font-weight:bold;letter-spacing:8px;color:#3182ce;padding:16px 0;">${code}</div>
+                <p style="color:#718096;font-size:0.9rem;">This code expires in <strong>10 minutes</strong>. Do not share it with anyone.</p>
+            </div>`
     });
-    return { sent: true };
+
+    try {
+        const https = require('https');
+        const result = await new Promise((resolve, reject) => {
+            const req = https.request({
+                hostname: 'api.brevo.com',
+                path:     '/v3/smtp/email',
+                method:   'POST',
+                headers: {
+                    'Content-Type':  'application/json',
+                    'api-key':       apiKey,
+                    'Content-Length': Buffer.byteLength(body)
+                }
+            }, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                    if (res.statusCode >= 200 && res.statusCode < 300) {
+                        resolve({ sent: true });
+                    } else {
+                        console.error('Brevo API error:', res.statusCode, data);
+                        reject(new Error(`Brevo API returned ${res.statusCode}: ${data}`));
+                    }
+                });
+            });
+            req.on('error', reject);
+            req.setTimeout(15000, () => {
+                req.destroy();
+                reject(new Error('Brevo API request timed out'));
+            });
+            req.write(body);
+            req.end();
+        });
+        return result;
+    } catch (err) {
+        console.error('sendOtpEmail error:', err.message);
+        return { sent: false, reason: err.message };
+    }
 }
 
 function getOtpKey({ uid, email, purpose }) {
