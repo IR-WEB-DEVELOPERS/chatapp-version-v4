@@ -9,16 +9,37 @@ auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((err) => {
 
 const LOGIN_VERIFIED_PREFIX = 'educhat_login_otp_verified_';
 
+// BUG FIX 14: Guard against initializeApp() being called more than once.
+// onAuthStateChanged can fire multiple times (token refresh, tab focus).
+// Without this guard the app would re-subscribe to all Firestore listeners
+// on every token refresh, causing duplicate messages and listener leaks.
+let _appInitialised = false;
+
+function _isLoginVerified(uid) {
+    // BUG FIX 2 (sync with login.js): Check both sessionStorage and
+    // localStorage so existing verified sessions still work after the
+    // sessionStorage migration in login.js.
+    return (
+        sessionStorage.getItem(`${LOGIN_VERIFIED_PREFIX}${uid}`) === 'true' ||
+        localStorage.getItem(`${LOGIN_VERIFIED_PREFIX}${uid}`) === 'true'
+    );
+}
+
 auth.onAuthStateChanged(async (user) => {
     console.log('Auth state changed:', user ? 'logged in' : 'no user');
     if (!user) {
         window.location.href = 'index.html';
         return;
     }
-    if (localStorage.getItem(`${LOGIN_VERIFIED_PREFIX}${user.uid}`) !== 'true') {
+    if (!_isLoginVerified(user.uid)) {
         window.location.href = 'index.html';
         return;
     }
+
+    // BUG FIX 14 (cont): Skip re-init on subsequent onAuthStateChanged calls.
+    if (_appInitialised) return;
+    _appInitialised = true;
+
     currentUser        = user;
     window.currentUser = currentUser;
     await initializeApp();
