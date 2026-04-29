@@ -14,6 +14,42 @@
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
     <link rel="stylesheet" href="login.css">
+    <style>
+        /* BUG FIX 11: Loading spinner for the Google button so users
+           know the app is initialising before login.js is ready. */
+        #appLoader {
+            text-align: center;
+            color: #718096;
+            font-size: 0.9rem;
+            margin-top: 12px;
+            display: none;
+        }
+        #configError {
+            display: none;
+            margin-top: 12px;
+            padding: 12px;
+            background: #fff5f5;
+            border: 1px solid #fed7d7;
+            border-radius: 8px;
+            color: #c53030;
+            font-size: 0.88rem;
+            text-align: center;
+        }
+        #configError button {
+            margin-top: 8px;
+            padding: 6px 16px;
+            background: #c53030;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+        .google-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+    </style>
 </head>
 <body>
     <main class="login-container">
@@ -27,10 +63,23 @@
                 <h2>Welcome back</h2>
                 <p class="subtitle">Sign in to continue chatting</p>
 
-                <button id="googleLogin" class="login-btn google-btn" type="button">
+                <!-- BUG FIX 11: Button is disabled until login.js is loaded
+                     so users can't click before Firebase is ready. -->
+                <button id="googleLogin" class="login-btn google-btn" type="button" disabled>
                     <span>G</span>
                     Continue with Google
                 </button>
+
+                <div id="appLoader">Loading…</div>
+
+                <!-- BUG FIX 12: Show a user-friendly error with a Retry button
+                     instead of injecting a raw red paragraph into the body. -->
+                <div id="configError">
+                    <strong>Could not connect to EduChat.</strong><br>
+                    Check your internet connection and try again.
+                    <br>
+                    <button onclick="window.location.reload()">Retry</button>
+                </div>
 
                 <div class="divider">
                     <span>Secure login</span>
@@ -50,18 +99,44 @@
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
     <script>
+        // BUG FIX 11: Show a loading indicator while fetching config.
+        document.getElementById('appLoader').style.display = 'block';
+
         // Fetch Firebase config from server (no hardcoded keys), then load login.js
         fetch('/firebase-config')
-            .then(r => r.json())
+            .then(r => {
+                // BUG FIX 13: The original code called r.json() without checking
+                // r.ok first. A 503 response (SMTP/Firebase not configured) would
+                // parse as JSON with an error key and silently fail downstream.
+                if (!r.ok) throw new Error('Server returned ' + r.status);
+                return r.json();
+            })
             .then(cfg => {
+                if (!cfg.apiKey || !cfg.projectId) {
+                    throw new Error('Incomplete Firebase config from server');
+                }
                 if (!firebase.apps.length) firebase.initializeApp(cfg);
+
+                // Store config for globals.js on chat.html to reuse
+                window._firebaseConfig = cfg;
+
                 const s = document.createElement('script');
                 s.src = 'login.js';
+                s.onload = () => {
+                    // Only enable button after login.js has fully executed
+                    document.getElementById('appLoader').style.display = 'none';
+                    document.getElementById('googleLogin').disabled = false;
+                };
+                s.onerror = () => {
+                    document.getElementById('appLoader').style.display = 'none';
+                    document.getElementById('configError').style.display = 'block';
+                };
                 document.body.appendChild(s);
             })
             .catch(err => {
                 console.error('Failed to load Firebase config:', err);
-                document.body.innerHTML += '<p style="color:red;text-align:center">Failed to load app config. Please refresh.</p>';
+                document.getElementById('appLoader').style.display = 'none';
+                document.getElementById('configError').style.display = 'block';
             });
     </script>
     <script>
