@@ -9,27 +9,30 @@ auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((err) => {
     console.warn('Firebase auth persistence setup failed:', err);
 });
 
-
 const LOGIN_VERIFIED_PREFIX = 'educhat_login_otp_verified_';
 
-let currentOtp = '';
-let currentOtpExpiry = 0;
+// BUG FIX 1: currentOtp / currentOtpExpiry were never populated from the
+// server response, so the browser-side fallback check was always false.
+// Removed the dead variables — verification is 100% server-side now.
 let resendTimer = null;
 let pendingUser = null;
 let otpSendInFlight = false;
 let lastOtpKey = '';
 
 function markLoginVerified(uid) {
-    localStorage.setItem(`${LOGIN_VERIFIED_PREFIX}${uid}`, 'true');
+    sessionStorage.setItem(`${LOGIN_VERIFIED_PREFIX}${uid}`, 'true');
+    // BUG FIX 2: Was using localStorage which persists forever.
+    // Switched to sessionStorage so OTP is re-required on new tab/browser session.
     localStorage.setItem('educhat_last_verified_uid', uid);
 }
 
 function isLoginVerified(uid) {
-    return localStorage.getItem(`${LOGIN_VERIFIED_PREFIX}${uid}`) === 'true';
-}
-
-function generateOtp() {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    // BUG FIX 2 (cont): Check sessionStorage first (current session), then
+    // fall back to localStorage for backward compat during migration.
+    return (
+        sessionStorage.getItem(`${LOGIN_VERIFIED_PREFIX}${uid}`) === 'true' ||
+        localStorage.getItem(`${LOGIN_VERIFIED_PREFIX}${uid}`) === 'true'
+    );
 }
 
 function ensureOtpModal() {
@@ -50,7 +53,7 @@ function ensureOtpModal() {
             </div>
             <div class="login-otp-body">
                 <div class="login-otp-email" id="loginOtpEmail"></div>
-                <input id="loginOtpInput" class="login-otp-input" type="text" inputmode="numeric" maxlength="6" placeholder="000000">
+                <input id="loginOtpInput" class="login-otp-input" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
                 <div id="loginOtpError" class="login-otp-error"></div>
                 <button id="verifyLoginOtp" class="login-otp-primary" type="button">Verify OTP</button>
                 <button id="resendLoginOtp" class="login-otp-secondary" type="button">Resend OTP</button>
@@ -66,11 +69,20 @@ function ensureOtpModal() {
         pendingUser = null;
         otpSendInFlight = false;
         lastOtpKey = '';
+        // BUG FIX 3: Closing OTP modal must also re-enable the Google button
+        // so the user can try again without reloading the page.
+        const googleBtn = document.getElementById('googleLogin');
+        if (googleBtn) googleBtn.disabled = false;
     });
     document.getElementById('verifyLoginOtp').addEventListener('click', verifyLoginOtp);
     document.getElementById('resendLoginOtp').addEventListener('click', () => sendLoginOtp(pendingUser));
     document.getElementById('loginOtpInput').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') verifyLoginOtp();
+    });
+
+    // BUG FIX 4: Only allow numeric characters in the OTP input field.
+    document.getElementById('loginOtpInput').addEventListener('input', (e) => {
+        e.target.value = e.target.value.replace(/\D/g, '');
     });
 
     return modal;
@@ -89,10 +101,8 @@ async function sendLoginOtp(user) {
     otpSendInFlight = true;
     lastOtpKey = key;
     pendingUser = user;
-    currentOtp = '';
-    currentOtpExpiry = 0;
 
-    // ── Show modal immediately — don't wait for SMTP round-trip ──
+    // Show modal immediately — don't wait for SMTP round-trip
     const modal = ensureOtpModal();
     document.getElementById('loginOtpEmail').textContent = user.email;
     document.getElementById('loginOtpInput').value = '';
@@ -121,6 +131,9 @@ async function sendLoginOtp(user) {
         lastOtpKey = '';
         modal.style.display = 'none';
         await auth.signOut();
+        // BUG FIX 3: Re-enable Google button on failure so user can retry.
+        const googleBtn = document.getElementById('googleLogin');
+        if (googleBtn) googleBtn.disabled = false;
         alert(response?.error || 'Failed to send OTP.');
         return;
     }
@@ -150,12 +163,18 @@ function startResendCountdown() {
 async function verifyLoginOtp() {
     const input = (document.getElementById('loginOtpInput')?.value || '').trim();
     const error = document.getElementById('loginOtpError');
+    const verifyBtn = document.getElementById('verifyLoginOtp');
+
     if (!/^\d{6}$/.test(input)) {
         error.textContent = 'Enter a valid 6-digit OTP.';
         return;
     }
 
-    let valid = input === currentOtp && Date.now() < currentOtpExpiry;
+    // BUG FIX 5: Disable button while verifying to prevent double-submit.
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = 'Verifying…';
+
+    let valid = false;
     try {
         const result = await fetch('/verify-otp', {
             method: 'POST',
@@ -170,11 +189,19 @@ async function verifyLoginOtp() {
         valid = !!result.ok;
         if (!valid && result.error) error.textContent = result.error;
     } catch (err) {
-        console.warn('Backend OTP verify failed, using browser fallback OTP:', err);
+        // BUG FIX 1 (cont): Removed insecure browser-side OTP fallback.
+        // If the server is unreachable, we show an error and let the user retry.
+        console.error('Backend OTP verify failed:', err);
+        error.textContent = 'Network error. Please try again.';
+        verifyBtn.disabled = false;
+        verifyBtn.textContent = 'Verify OTP';
+        return;
     }
 
     if (!valid) {
         if (!error.textContent) error.textContent = 'Invalid or expired OTP.';
+        verifyBtn.disabled = false;
+        verifyBtn.textContent = 'Verify OTP';
         return;
     }
 
@@ -188,7 +215,11 @@ async function verifyLoginOtp() {
 // we must NOT send OTP automatically; only redirect if already verified.
 let _otpTriggeredByClick = false;
 
-document.getElementById('googleLogin').onclick = async () => {
+document.getElementById('googleLogin').onclick = async (e) => {
+    const btn = e.currentTarget;
+    // BUG FIX 6: Disable button immediately on click to prevent double-clicks
+    // that fire two Google popups / two sendLoginOtp calls.
+    btn.disabled = true;
     try {
         const provider = new firebase.auth.GoogleAuthProvider();
         _otpTriggeredByClick = true;
@@ -197,7 +228,11 @@ document.getElementById('googleLogin').onclick = async () => {
     } catch (error) {
         _otpTriggeredByClick = false;
         console.error('Login error:', error);
-        alert('Login failed. Please try again.');
+        btn.disabled = false;
+        // BUG FIX 7: Don't alert on popup-closed-by-user — that's not an error.
+        if (error.code !== 'auth/popup-closed-by-user' && error.code !== 'auth/cancelled-popup-request') {
+            alert('Login failed: ' + (error.message || 'Please try again.'));
+        }
     }
 };
 
