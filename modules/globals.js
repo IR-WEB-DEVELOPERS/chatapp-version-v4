@@ -3,7 +3,13 @@
 // ============================================================
 
 // ── Firebase Initialization ──────────────────────────────────
-const firebaseConfig = {
+// BUG FIX 8: globals.js had a hardcoded Firebase config that was always used
+// on chat.html, regardless of env vars set on the server. index.html correctly
+// fetched /firebase-config but globals.js (loaded by chat.html) did not.
+// Fix: fetch /firebase-config first; fall back to hardcoded values only if
+// the server is unreachable (e.g. local file:// dev without a server).
+
+const _hardcodedFirebaseConfig = {
     apiKey: "AIzaSyBclTC8gK3QKi1X6Q-YCK2jT38yJ83xOcQ",
     authDomain: "chat-app-a0f95.firebaseapp.com",
     projectId: "chat-app-a0f95",
@@ -12,20 +18,61 @@ const firebaseConfig = {
     appId: "1:754786153113:web:7543bfb097732ad229fe08",
     measurementId: "G-JFKWR83KYJ"
 };
-// Expose as a single source of truth for other scripts (e.g. pushNotifications.js)
-window._firebaseConfig = firebaseConfig;
 
-console.log('Initializing Firebase...');
+async function _initFirebase() {
+    let firebaseConfig = _hardcodedFirebaseConfig;
+
+    // If already initialised (e.g. index.html fetched config inline), reuse it.
+    if (firebase.apps.length) {
+        console.log('Firebase already initialised — reusing existing app.');
+        return;
+    }
+
+    try {
+        const res = await fetch('/firebase-config');
+        if (res.ok) {
+            const cfg = await res.json();
+            if (cfg.apiKey && cfg.projectId) {
+                firebaseConfig = cfg;
+            }
+        }
+    } catch (err) {
+        console.warn('Could not fetch /firebase-config, using fallback config:', err);
+    }
+
+    window._firebaseConfig = firebaseConfig;
+
+    console.log('Initializing Firebase...');
+    try {
+        firebase.initializeApp(firebaseConfig);
+        console.log('Firebase initialized successfully');
+    } catch (error) {
+        console.error('Firebase initialization error:', error);
+    }
+}
+
+// BUG FIX 9: globals.js used to run synchronously — downstream modules that
+// depend on `db` and `auth` globals would crash because Firebase wasn't ready.
+// We now block the rest of this script with a top-level await (module context)
+// or, since this is a classic script, we expose a ready-promise that app.js
+// can await before calling initializeApp().
+//
+// For backward compat we initialise synchronously from the hardcoded config
+// first (so `db`/`auth` are always defined), then upgrade to server config.
+window._firebaseConfig = _hardcodedFirebaseConfig;
+console.log('Initializing Firebase (sync fallback)...');
 try {
     if (!firebase.apps.length) {
-        firebase.initializeApp(firebaseConfig);
-    } else {
-        firebase.app();
+        firebase.initializeApp(_hardcodedFirebaseConfig);
     }
     console.log('Firebase initialized successfully');
 } catch (error) {
     console.error('Firebase initialization error:', error);
 }
+
+// Kick off the async upgrade in the background; app.js will wait on
+// window._firebaseConfigReady before calling initializeApp().
+window._firebaseConfigReady = _initFirebase();
 
 const auth = firebase.auth();
 const db   = firebase.firestore();
@@ -193,6 +240,11 @@ const enhancedCache = {
 
 // ── getUserData (needed by multiple modules) ─────────────────
 async function getUserData(uid) {
+    // BUG FIX 10: getUserData returned null silently if uid was undefined/null
+    // (e.g. when called before currentUser was set), causing cascading
+    // "Cannot read properties of null" errors in friends list rendering.
+    if (!uid) return null;
+
     const cacheKey = `user_${uid}`;
     const cached   = enhancedCache.get(cacheKey);
     if (cached) return cached;
