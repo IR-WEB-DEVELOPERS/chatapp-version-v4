@@ -693,6 +693,7 @@ class WebRTCManager {
                     ${isVideoCall ? `<button class="call-btn mute-video" title="Mute Video">${window.Icons.get('videoFill', 24)}</button>` : ''}
                     ${isVideoCall && !this.isMobileDevice() ? `<button class="call-btn screen-share" title="Share Screen">${window.Icons.get('monitor', 24)}</button>` : ''}
                     ${isVideoCall ? `<button class="call-btn switch-camera" title="Switch Camera">${window.Icons.get('switchCam', 24)}</button>` : ''}
+                    <button class="call-btn add-member" title="Add Person to Call">${window.Icons.get('addUser', 24) || '➕'}</button>
                     <button class="call-btn end-call" title="End Call">${window.Icons.get('phoneEnd', 24)}</button>
                 </div>
             </div>
@@ -1065,11 +1066,12 @@ class WebRTCManager {
     }
 
     setupCallUIEventListeners() {
-        const muteAudioBtn = document.querySelector('.mute-audio');
-        const muteVideoBtn = document.querySelector('.mute-video');
+        const muteAudioBtn   = document.querySelector('.mute-audio');
+        const muteVideoBtn   = document.querySelector('.mute-video');
         const screenShareBtn = document.querySelector('.screen-share');
         const switchCameraBtn = document.querySelector('.switch-camera');
-        const endCallBtn = document.querySelector('.end-call');
+        const addMemberBtn   = document.querySelector('.add-member');
+        const endCallBtn     = document.querySelector('.end-call');
 
         if (muteAudioBtn) {
             muteAudioBtn.addEventListener('click', () => {
@@ -1099,6 +1101,12 @@ class WebRTCManager {
             });
         }
 
+        if (addMemberBtn) {
+            addMemberBtn.addEventListener('click', () => {
+                this.openAddMemberSheet();
+            });
+        }
+
         if (endCallBtn) {
             endCallBtn.addEventListener('click', () => {
                 this.endCall();
@@ -1120,9 +1128,268 @@ class WebRTCManager {
         try {
             const message = JSON.parse(data);
             console.log('Data channel message:', message);
+
+            // Handle group call migration signal
+            if (message.type === 'group_migrate' && message.roomId) {
+                this.handleGroupMigrationSignal(message.roomId, message.isVideo);
+            }
         } catch (error) {
             console.error('Error parsing data channel message:', error);
         }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  ADD PERSON TO CALL — Friend Picker + Group Call Upgrade
+    // ══════════════════════════════════════════════════════════════
+
+    /**
+     * Opens the bottom-sheet friend picker.
+     * Uses styles already in call-styles.css:
+     *   .add-member-overlay, .add-member-sheet, .am-friend-item, etc.
+     */
+    async openAddMemberSheet() {
+        // Remove any existing sheet
+        const existing = document.getElementById('addMemberOverlay');
+        if (existing) { existing.remove(); return; }
+
+        const overlay = document.createElement('div');
+        overlay.id = 'addMemberOverlay';
+        overlay.className = 'add-member-overlay';
+        overlay.innerHTML = `
+            <div class="add-member-sheet" id="addMemberSheet">
+                <div class="add-member-header">
+                    <h3>Add Person to Call</h3>
+                    <button class="add-member-close" id="amCloseBtn" title="Close">✕</button>
+                </div>
+                <div class="add-member-search">
+                    <input type="text" id="amSearchInput" placeholder="Search friends…" autocomplete="off">
+                </div>
+                <div class="add-member-list" id="amFriendList">
+                    <div class="add-member-empty">Loading friends…</div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        // Close on backdrop click
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) overlay.remove();
+        });
+        document.getElementById('amCloseBtn').addEventListener('click', () => overlay.remove());
+
+        // Search filter
+        document.getElementById('amSearchInput').addEventListener('input', (e) => {
+            this._renderFriendList(this._amFriends || [], e.target.value.toLowerCase());
+        });
+
+        // Load friends
+        await this._loadFriendsForAddMember();
+    }
+
+    async _loadFriendsForAddMember() {
+        const listEl = document.getElementById('amFriendList');
+        if (!listEl) return;
+
+        try {
+            const db = window.db;
+            const currentUser = window.currentUser;
+            if (!db || !currentUser) {
+                listEl.innerHTML = '<div class="add-member-empty">Not signed in.</div>';
+                return;
+            }
+
+            // Load from Firestore: friends subcollection
+            const snap = await db.collection('users').doc(currentUser.uid)
+                .collection('friends')
+                .where('status', '==', 'friends')
+                .get();
+
+            const friends = [];
+            snap.forEach(doc => {
+                const d = doc.data();
+                // Exclude the person already in the call
+                if (d.uid !== this.callTarget) {
+                    friends.push({ uid: d.uid, name: d.name || d.uid.slice(0, 8), photo: d.photoURL || '' });
+                }
+            });
+
+            this._amFriends = friends;
+            this._amInvited = new Set();
+            this._renderFriendList(friends, '');
+        } catch (err) {
+            console.error('Error loading friends for add-member:', err);
+            if (document.getElementById('amFriendList')) {
+                document.getElementById('amFriendList').innerHTML =
+                    '<div class="add-member-empty">Could not load friends.</div>';
+            }
+        }
+    }
+
+    _renderFriendList(friends, query) {
+        const listEl = document.getElementById('amFriendList');
+        if (!listEl) return;
+
+        const filtered = query
+            ? friends.filter(f => f.name.toLowerCase().includes(query))
+            : friends;
+
+        if (!filtered.length) {
+            listEl.innerHTML = '<div class="add-member-empty">No friends found.</div>';
+            return;
+        }
+
+        listEl.innerHTML = filtered.map(f => {
+            const invited = this._amInvited?.has(f.uid);
+            const avatarHTML = f.photo
+                ? `<img src="${f.photo}" alt="${this._escHTML(f.name)}">`
+                : this._escHTML((f.name[0] || '?').toUpperCase());
+            return `
+                <button class="am-friend-item" data-uid="${f.uid}" ${invited ? 'disabled' : ''}>
+                    <div class="am-avatar">${avatarHTML}</div>
+                    <div class="am-info">
+                        <div class="am-name">${this._escHTML(f.name)}</div>
+                        <div class="am-status">${invited ? 'Invite sent' : 'Tap to invite'}</div>
+                    </div>
+                    <span class="${invited ? 'am-invited-badge' : 'am-invite-badge'}">
+                        ${invited ? 'Invited' : 'Invite'}
+                    </span>
+                </button>`;
+        }).join('');
+
+        // Attach click listeners
+        listEl.querySelectorAll('.am-friend-item:not([disabled])').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const uid = btn.dataset.uid;
+                const friend = friends.find(f => f.uid === uid);
+                if (friend) this._invitePersonToCall(uid, friend.name, btn);
+            });
+        });
+    }
+
+    /**
+     * Core logic: upgrades the 1-to-1 call to a group call room,
+     * then sends a Firestore invite to the chosen friend.
+     *
+     * Flow:
+     *  1. If GroupCallManager not already active → migrate this 1-1 call into a group room
+     *  2. Send groupCallInvite doc → friend's listener picks it up and shows incoming call UI
+     *  3. Show "Invited" badge on the button
+     */
+    async _invitePersonToCall(targetUID, targetName, btnEl) {
+        if (!this.currentCallId) return;
+
+        // Disable button immediately to prevent double-tap
+        btnEl.disabled = true;
+        btnEl.querySelector('.am-invite-badge').textContent = 'Sending…';
+
+        try {
+            // ── Step 1: Migrate 1-1 call to group call room ──────────
+            // Use the existing callId as the group room ID so both
+            // the current caller and callee can join the same mesh.
+            const roomId = this.currentCallId;
+
+            if (!window.GroupCallManager?.isActive()) {
+                console.log('🔄 Migrating 1-1 call to group room:', roomId);
+
+                // Tell the remote peer (callee of the original 1-1 call) to
+                // also join the group room via signaling custom message.
+                // We piggy-back on the data channel if open, otherwise
+                // send a Firestore migration signal.
+                await this._sendGroupMigrationSignal(roomId);
+
+                // Start GroupCallManager on this side with the same room
+                // (carries over the existing local stream concept but opens new mesh)
+                await window.GroupCallManager.startCall(roomId, this.isVideoCall);
+            }
+
+            // ── Step 2: Send invite to the new person ────────────────
+            const sent = await window.GroupCallManager.inviteToRoom(targetUID, roomId, this.isVideoCall);
+
+            if (sent) {
+                if (!this._amInvited) this._amInvited = new Set();
+                this._amInvited.add(targetUID);
+
+                // Update button UI
+                btnEl.querySelector('.am-invite-badge').textContent = 'Invited';
+                btnEl.querySelector('.am-status').textContent = 'Invite sent';
+                btnEl.classList.add('am-invited');
+
+                window.showToast?.(`Invite sent to ${targetName}`, 'success');
+                console.log(`✅ Group call invite sent to ${targetName}`);
+
+                // Close the sheet after a short delay
+                setTimeout(() => {
+                    const overlay = document.getElementById('addMemberOverlay');
+                    if (overlay) overlay.remove();
+                }, 900);
+            } else {
+                throw new Error('inviteToRoom returned false');
+            }
+        } catch (err) {
+            console.error('❌ Error inviting person to call:', err);
+            btnEl.disabled = false;
+            btnEl.querySelector('.am-invite-badge').textContent = 'Retry';
+            window.showToast?.('Could not send invite: ' + err.message, 'error');
+        }
+    }
+
+    /**
+     * Sends a migration signal to the existing 1-1 call peer so they
+     * know to also join the group room.  We try the data channel first,
+     * then fall back to a Firestore signal doc.
+     */
+    async _sendGroupMigrationSignal(roomId) {
+        const payload = JSON.stringify({ type: 'group_migrate', roomId, isVideo: this.isVideoCall });
+
+        // Try data channel (fast path)
+        if (this.dataChannel && this.dataChannel.readyState === 'open') {
+            this.dataChannel.send(payload);
+            console.log('📡 Migration signal sent via data channel');
+            return;
+        }
+
+        // Fallback: Firestore signal doc
+        try {
+            const db = window.db;
+            const currentUser = window.currentUser;
+            if (db && currentUser && this.callTarget) {
+                await db.collection('groupCallMigrations').add({
+                    from:    currentUser.uid,
+                    to:      this.callTarget,
+                    roomId,
+                    isVideo: this.isVideoCall,
+                    callId:  this.currentCallId,
+                    created: new Date()
+                });
+                console.log('📡 Migration signal sent via Firestore');
+            }
+        } catch (e) {
+            console.warn('Migration signal send failed (non-critical):', e);
+        }
+    }
+
+    /**
+     * Called by the data channel message handler when a 'group_migrate'
+     * message is received — the callee side auto-joins the group room.
+     */
+    async handleGroupMigrationSignal(roomId, isVideo) {
+        console.log('📥 Received group migration signal, joining room:', roomId);
+        try {
+            if (!window.GroupCallManager?.isActive()) {
+                await window.GroupCallManager.joinExistingCall(roomId, isVideo);
+                window.showToast?.('Joined group call', 'info');
+            }
+        } catch (err) {
+            console.error('Error joining group call via migration:', err);
+        }
+    }
+
+    _escHTML(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
     }
 }
 
