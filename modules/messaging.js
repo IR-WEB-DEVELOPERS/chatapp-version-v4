@@ -255,14 +255,28 @@ function displayGroupMessages(messages) {
     if (!chatContainer) return;
 
     renderPinnedBanner(messages.find(m => m.pinned && !m.deletedForAll), 'group');
+    // BUG FIX 1: Group messages never called markMessagesAsSeen, so group
+    // message ticks never turned blue and unread counts never cleared.
+    markGroupMessagesAsSeen(messages);
 
     chatContainer.innerHTML = renderMessagesToHTML(messages, true);
     attachMessageActionListeners(chatContainer, messages, 'group');
     window.chatInteractions?.attach(chatContainer, messages, 'group');
     attachLinkPreviews(chatContainer);
 
-    // FIX: always scroll to bottom after rendering
     scrollToBottom('groupChat');
+}
+
+// BUG FIX 1 (cont): separate seen function for group messages
+function markGroupMessagesAsSeen(messages) {
+    if (!groupChatID || !currentUser) return;
+    messages
+        .filter(m => m.sender !== currentUser.uid && !(m.seenBy || []).includes(currentUser.uid) && !m.deletedForAll && m.sender !== 'system')
+        .forEach(msg => {
+            db.collection('groupMessages').doc(msg.id).update({
+                seenBy: firebase.firestore.FieldValue.arrayUnion(currentUser.uid)
+            }).catch(() => {});
+        });
 }
 
 // ── Load direct messages ─────────────────────────────────────
@@ -1289,7 +1303,13 @@ async function confirmScheduleMessage(text, chatType) {
         chatType,
         scheduledAt: scheduledAt.getTime(),
         sender: currentUser.uid,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        // BUG FIX 3: The document was saved WITHOUT a `sent` field, but
+        // restoreScheduledMessages() queries for `.where('sent', '==', false)`.
+        // Firestore does not match documents where a field is absent — only
+        // documents where the field exists and equals false. So every scheduled
+        // message was orphaned on page reload and never dispatched.
+        sent: false
     };
 
     if (chatType === 'group') {
@@ -1384,6 +1404,7 @@ window.cancelEdit        = cancelEdit;
 // ── Expose ───────────────────────────────────────────────────
 window.displayMessages       = displayMessages;
 window.displayGroupMessages  = displayGroupMessages;
+window.markGroupMessagesAsSeen = markGroupMessagesAsSeen;
 window.loadMessages          = loadMessages;
 window.loadGroupMessages     = loadGroupMessages;
 window.loadOlderDirectMessages = loadOlderDirectMessages;
@@ -1397,6 +1418,11 @@ window.showDeleteMenu        = showDeleteMenu;
 async function openOneTimeViewMessage(msgId, chatType) {
     if (!msgId || !currentUser) return;
     const collection = chatType === 'group' ? 'groupMessages' : 'messages';
+    // BUG FIX 2: `I` (Icons) was used inside this function but never defined
+    // locally. All other functions that use Icons define `const I = window.Icons`
+    // at the top. Without it, the OTV modal header showed a JS ReferenceError
+    // instead of the eye icon, and on some browsers silently failed to open.
+    const I = window.Icons;
     try {
         // 1. Mark as opened immediately so UI updates
         await db.collection(collection).doc(msgId).update({ oneTimeViewOpened: true });
@@ -1499,8 +1525,13 @@ window.showScheduleModal     = showScheduleModal;
 window.startEditMessage      = startEditMessage;
 window.cancelEdit            = cancelEdit;
 
-// Restore pending scheduled messages
-if (window.currentUser) restoreScheduledMessages();
-document.addEventListener('authReady', () => restoreScheduledMessages());
+// Restore pending scheduled messages on page load.
+// BUG FIX 4: Was listening to 'authReady' on document, but app.js dispatches
+// 'appInitialized' on window. Scheduled messages were silently lost on reload.
+if (window.currentUser) {
+    restoreScheduledMessages();
+} else {
+    window.addEventListener('appInitialized', () => restoreScheduledMessages(), { once: true });
+}
 
 console.log('messaging.js loaded');
