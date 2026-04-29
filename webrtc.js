@@ -156,25 +156,31 @@ class WebRTCManager {
     // ─── Handle received answer ────────────────────────────────────────
     async handleAnswer(answer) {
         if (!this.peerConnection) {
-            console.error('No peer connection to set answer on');
+            console.error("No peer connection to set answer on");
+            return;
+        }
+
+        // Guard: setRemoteDescription(answer) valid only in 'have-local-offer' state.
+        // Firestore snapshots can fire multiple times — second call hits 'stable' state → InvalidStateError.
+        const state = this.peerConnection.signalingState;
+        if (state !== 'have-local-offer') {
+            console.warn("Skipping duplicate setRemoteDescription — signalingState is", state);
             return;
         }
 
         try {
-            console.log('📥 Setting remote answer');
+            console.log("Setting remote answer (state:", state, ")");
             await this.peerConnection.setRemoteDescription(answer);
             this.remoteDescSet = true;
 
-            // Process any queued ICE candidates
             this._processPendingICECandidates();
 
-            // Switch to active call UI
             const targetData = await window.getUserData(this.currentCallTarget);
             this._showActiveCallUI(targetData);
 
-            console.log('✅ Remote description set, call active');
+            console.log("Remote description set, call active");
         } catch (error) {
-            console.error('❌ Error setting remote answer:', error);
+            console.error("Error setting remote answer:", error);
         }
     }
 
