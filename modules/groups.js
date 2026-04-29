@@ -63,51 +63,61 @@ async function createGroup() {
     }
 }
 
-async function loadGroupsList() {
+// BUG FIX 6: loadGroupsList used a one-time .get() so the groups list never
+// updated when a new group was created, when the user was added to a group by
+// someone else, or when they left — a page reload was required every time.
+// Replaced with onSnapshot for live updates.
+let _unsubGroupsList = null;
+
+function loadGroupsList() {
     const groupsDiv = document.getElementById('groupsList');
     if (!groupsDiv) return;
 
-    try {
-        const snapshot = await db.collection('groups')
-            .where('members', 'array-contains', currentUser.uid)
-            .get();
+    // Cancel previous listener to avoid duplicates
+    if (_unsubGroupsList) { _unsubGroupsList(); _unsubGroupsList = null; }
 
-        const countBadge = document.getElementById('groupsCount');
-        if (countBadge) countBadge.textContent = snapshot.size;
+    _unsubGroupsList = db.collection('groups')
+        .where('members', 'array-contains', currentUser.uid)
+        .onSnapshot(snapshot => {
+            const countBadge = document.getElementById('groupsCount');
+            if (countBadge) countBadge.textContent = snapshot.size;
 
-        if (snapshot.empty) {
-            groupsDiv.innerHTML = '<div class="no-groups">No groups yet. Create one above!</div>';
-            return;
-        }
+            if (snapshot.empty) {
+                groupsDiv.innerHTML = '<div class="no-groups">No groups yet. Create one above!</div>';
+                return;
+            }
 
-        let html = '';
-        snapshot.forEach(doc => {
-            const group       = doc.data();
-            const memberCount = Array.isArray(group.members) ? group.members.length : 0;
-            html += `
-                <button class="group-item" data-groupid="${escapeAttribute(doc.id)}">
-                    <div class="group-avatar-icon">${escapeHTML((group.name || 'G')[0].toUpperCase())}</div>
-                    <div class="group-info">
-                        <h4>${escapeHTML(group.name)}</h4>
-                        <p>${window.Icons ? window.Icons.get('users', 12) : ''} ${memberCount} member${memberCount !== 1 ? 's' : ''}</p>
-                    </div>
-                </button>
-            `;
-        });
+            // Preserve active group highlight across re-renders
+            const activeId = groupsDiv.querySelector('.group-item.active')?.dataset.groupid;
 
-        groupsDiv.innerHTML = html;
-        groupsDiv.querySelectorAll('.group-item').forEach(item => {
-            item.addEventListener('click', () => {
-                groupsDiv.querySelectorAll('.group-item').forEach(i => i.classList.remove('active'));
-                item.classList.add('active');
-                openGroupChat(item.dataset.groupid);
+            let html = '';
+            snapshot.forEach(doc => {
+                const group       = doc.data();
+                const memberCount = Array.isArray(group.members) ? group.members.length : 0;
+                const isActive    = doc.id === activeId ? ' active' : '';
+                html += `
+                    <button class="group-item${isActive}" data-groupid="${escapeAttribute(doc.id)}">
+                        <div class="group-avatar-icon">${escapeHTML((group.name || 'G')[0].toUpperCase())}</div>
+                        <div class="group-info">
+                            <h4>${escapeHTML(group.name)}</h4>
+                            <p>${window.Icons ? window.Icons.get('users', 12) : ''} ${memberCount} member${memberCount !== 1 ? 's' : ''}</p>
+                        </div>
+                    </button>
+                `;
             });
-        });
 
-    } catch (error) {
-        console.error('Error loading groups:', error);
-        groupsDiv.innerHTML = '<div class="no-groups">Error loading groups</div>';
-    }
+            groupsDiv.innerHTML = html;
+            groupsDiv.querySelectorAll('.group-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    groupsDiv.querySelectorAll('.group-item').forEach(i => i.classList.remove('active'));
+                    item.classList.add('active');
+                    openGroupChat(item.dataset.groupid);
+                });
+            });
+        }, error => {
+            console.error('Error loading groups:', error);
+            groupsDiv.innerHTML = '<div class="no-groups">Error loading groups</div>';
+        });
 }
 
 async function openGroupChat(groupId) {
