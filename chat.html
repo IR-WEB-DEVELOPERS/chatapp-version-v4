@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- interactive-widget=resizes-content: tells Android Chrome to shrink the
+         layout viewport when the OSK opens, so the input bar stays visible.
+         Without this, 100dvh ignores the keyboard on Android Chrome ≥ 108. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
     <title>EduChat</title>
     <!-- PWA -->
     <link rel="manifest" href="manifest.json">
@@ -590,6 +593,40 @@
             if (sidebar) sidebar.classList.remove('mobile-hidden');
         }
     </script>
+    <!-- ── MOBILE KEYBOARD FIX ─────────────────────────────────────────────
+         iOS Safari does NOT honour interactive-widget in the viewport meta.
+         Instead we use the visualViewport API to pin the input bar to the
+         visible area whenever the on-screen keyboard changes the viewport height.
+         Android Chrome ≥ 108 is handled by the meta tag; this is the iOS fallback.
+    ──────────────────────────────────────────────────────────────────────── -->
+    <script>
+    (function () {
+        if (!window.visualViewport) return;
+
+        // Only activate on mobile (≤ 599 logical px)
+        function isMobile() { return window.innerWidth <= 599; }
+
+        function onViewportResize() {
+            if (!isMobile()) return;
+            // --kb-offset: distance from the bottom of the visual viewport to
+            // the bottom of the layout viewport (= keyboard height on iOS).
+            const offset = Math.max(0, window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop);
+            document.documentElement.style.setProperty('--kb-offset', offset + 'px');
+        }
+
+        window.visualViewport.addEventListener('resize', onViewportResize);
+        window.visualViewport.addEventListener('scroll', onViewportResize);
+        // Reset when keyboard is dismissed
+        window.addEventListener('resize', () => {
+            if (!isMobile()) {
+                document.documentElement.style.setProperty('--kb-offset', '0px');
+            }
+        });
+        // Initial value
+        document.documentElement.style.setProperty('--kb-offset', '0px');
+    })();
+    </script>
+
     <!-- PWA Service Worker -->
     <script>
         if ('serviceWorker' in navigator) {
